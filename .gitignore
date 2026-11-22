@@ -1,0 +1,5 @@
+build/
+*.pdb
+*.ilk
+.vs/
+__pycache__/
