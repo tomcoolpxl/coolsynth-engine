@@ -20,7 +20,12 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-NGSPICE = os.path.join(ROOT, "tools", "ngspice", "Spice64", "bin", "ngspice_con.exe")
+# ngspice is installed, never committed: COOLSYNTH_NGSPICE names it, or it is in this repository's tools/ngspice, or,
+# with the engine as an app's submodule (external/coolsynth-engine), in the app's tools/ngspice.
+_NGSPICE_PLACES = [os.environ.get("COOLSYNTH_NGSPICE", "")] + [
+    os.path.join(base, "tools", "ngspice", "Spice64", "bin", "ngspice_con.exe")
+    for base in (ROOT, os.path.join(ROOT, os.pardir, os.pardir))]
+NGSPICE = next((p for p in _NGSPICE_PLACES if p and os.path.isfile(p)), _NGSPICE_PLACES[1])
 NETLIST = os.path.join(ROOT, "tools", "kick808", "bassdrum.cir")
 LEFT_OUT = {"rq", "qg", "dg", "rg", "cg", "rb", "ri1", "ci1", "rl", "ri2", "ci2"}
 STEP = 40.0e-6
