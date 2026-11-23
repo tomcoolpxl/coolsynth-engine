@@ -90,6 +90,9 @@ namespace coolsynth::synth
         /** The patterns to play in a row (indices into the bank). While stopped it takes effect at once, from bar 0;
             while playing at the end of the pattern that plays. */
         void setChain(const int* patterns, int count) noexcept;
+        /** As setChain, but while playing the chain begins at the given bar, its first pattern from its start: at once
+            when the bar is already being played or looked ahead to. A beat auditioned in time comes in on a bar line. */
+        void setChainFrom(const int* patterns, int count, std::int64_t bar) noexcept;
         /** Plays the fill pattern once, in the bar after the one that plays (while it plays, or is waiting to, a
             second ask changes nothing; asked while stopped, nothing). */
         void requestFill() noexcept { fillAsked = true; }
@@ -142,6 +145,8 @@ namespace coolsynth::synth
         std::int64_t chainStartBar = 0;
         std::array<int, maxChain> nextChain { 0 };
         int nextChainLength = 0; // > 0: waiting for the end of the pattern that plays
+        bool nextChainAtBar = false; // waiting for nextChainBar instead
+        std::int64_t nextChainBar = 0;
         std::array<int, maxChain> previousChain { 0 }; // the chain before the latest switch, for its last bars
         int previousChainLength = 0;
         std::int64_t previousChainStartBar = 0;

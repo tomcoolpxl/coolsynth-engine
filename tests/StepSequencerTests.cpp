@@ -406,6 +406,45 @@ public:
             expect(hits[1].note == 38 && hits[1].sample == 16 * kSixteenth);
         }
 
+        beginTest("a_chain_set_from_a_bar_begins_there_and_not_at_the_pattern_end");
+        {
+            // A then B: a pattern lasts two bars, and a chain from bar 1 begins mid-pattern, with its first pattern's A.
+            auto bank = std::make_unique<SequencerBank>();
+            for (const bool b : { false, true })
+            {
+                lane(bank->pattern[0], 0, 36, { 0 }, b);
+                lane(bank->pattern[1], 0, 38, { 0 }, b);
+                lane(bank->pattern[2], 0, 42, { 0 }, b);
+            }
+            SequencerSettings s;
+            s.variation = SequencerVariation::ab;
+            const int next[] { 1, 2 };
+            for (const double before : { 1.0, 3.9 }) // in the bar, and with the look ahead already in the next one
+            {
+                auto rig = std::make_unique<Rig>();
+                rig->sequencer.setBank(*bank);
+                rig->sequencer.setSettings(s);
+                std::vector<Note> notes;
+                rig->play(before, 256, true, &notes);
+                rig->sequencer.setChainFrom(next, 2, 1);
+                rig->play(20.0 - before, 256, true, &notes);
+                const auto hits = ons(notes);
+                expectEquals(static_cast<int>(hits.size()), 5);
+                if (hits.size() == 5)
+                {
+                    expect(hits[0].note == 36 && hits[1].note == 38 && hits[2].note == 38 && hits[3].note == 42
+                           && hits[4].note == 42, "the old bar, then the new chain from its start");
+                    expectEquals(hits[1].sample, 16 * kSixteenth);
+                }
+            }
+
+            auto stopped = std::make_unique<Rig>(); // stopped, as setChain: from bar 0
+            stopped->sequencer.setBank(*bank);
+            stopped->sequencer.setChainFrom(next, 2, 7);
+            const auto hits = ons(stopped->run(4.0));
+            expect(hits.size() == 1 && hits[0].note == 38 && hits[0].sample == 0);
+        }
+
         beginTest("a_loop_back_to_before_a_switch_plays_the_chain_chosen");
         {
             auto bank = std::make_unique<SequencerBank>();

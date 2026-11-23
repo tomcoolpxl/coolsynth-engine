@@ -55,6 +55,7 @@ namespace coolsynth::synth
         auto& target = wasPlaying ? nextChain : chain;
         for (int i = 0; i < count; ++i)
             target[static_cast<std::size_t>(i)] = std::clamp(patterns[i], 0, SequencerBank::patterns - 1);
+        nextChainAtBar = false;
         if (wasPlaying)
             nextChainLength = count;
         else
@@ -66,6 +67,15 @@ namespace coolsynth::synth
         }
     }
 
+    void StepSequencer::setChainFrom(const int* patterns, int count, std::int64_t bar) noexcept
+    {
+        if (patterns == nullptr || count <= 0)
+            return;
+        setChain(patterns, count);
+        nextChainAtBar = wasPlaying;
+        nextChainBar = bar;
+    }
+
     void StepSequencer::reset() noexcept
     {
         if (nextChainLength > 0)
@@ -73,6 +83,7 @@ namespace coolsynth::synth
             chain = nextChain;
             chainLength = nextChainLength;
             nextChainLength = 0;
+            nextChainAtBar = false;
         }
         chainStartBar = 0;
         previousChainLength = 0;
@@ -149,6 +160,7 @@ namespace coolsynth::synth
         chainLength = nextChainLength;
         chainStartBar = bar;
         nextChainLength = 0;
+        nextChainAtBar = false;
     }
 
     void StepSequencer::advanceTo(std::int64_t bar) noexcept
@@ -156,9 +168,10 @@ namespace coolsynth::synth
         while (lastBar < bar)
         {
             ++lastBar;
-            // A chain set while playing takes over at the end of the pattern that plays.
-            if (nextChainLength > 0 && floorMod(lastBar - chainStartBar, barsPerPattern()) == 0)
-                switchChainAt(lastBar);
+            // A chain set while playing takes over at the end of the pattern that plays, or at its own bar.
+            if (nextChainLength > 0
+                && (nextChainAtBar ? lastBar >= nextChainBar : floorMod(lastBar - chainStartBar, barsPerPattern()) == 0))
+                switchChainAt(nextChainAtBar ? nextChainBar : lastBar);
         }
     }
 
@@ -225,6 +238,7 @@ namespace coolsynth::synth
                     chain = nextChain;
                     chainLength = nextChainLength;
                     nextChainLength = 0;
+                    nextChainAtBar = false;
                 }
                 chainStartBar = 0;
                 previousChainLength = 0;
@@ -265,7 +279,7 @@ namespace coolsynth::synth
         if (nextChainLength > 0)
         {
             const int per = barsPerPattern();
-            const auto boundary = barNow + per - floorMod(barNow - chainStartBar, per);
+            const auto boundary = nextChainAtBar ? nextChainBar : barNow + per - floorMod(barNow - chainStartBar, per);
             if (boundary <= lastBar)
                 switchChainAt(boundary);
         }
