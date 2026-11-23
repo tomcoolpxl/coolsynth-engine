@@ -8,7 +8,8 @@
 
 /*
     The flight recorder: tripwires and events from every thread, kept in a ring buffer in memory and written to a
-    log file by a background thread (%LOCALAPPDATA%\CoolSynth\logs, one file per session, the last 20 kept).
+    log file by a background thread (%LOCALAPPDATA%\CoolSynth\logs, on macOS ~/Library/Logs/CoolSynth, one file
+    per session, the last 20 kept).
 
     record() is wait-free and allocation-free, so the audio thread may call it: it claims a slot with one atomic
     add, fills a fixed-size record and publishes it. When the writer falls behind, the oldest records are

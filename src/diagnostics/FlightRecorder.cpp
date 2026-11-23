@@ -61,8 +61,14 @@ namespace coolsynth::diag
         if (! started.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             return;
 
+       #if JUCE_MAC
+        // JUCE's user application data is ~/Library on macOS; the Mac's place for logs is ~/Library/Logs.
+        const auto folder = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                                .getChildFile("Logs").getChildFile("CoolSynth");
+       #else
         const auto folder = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
                                 .getParentDirectory().getChildFile("Local").getChildFile("CoolSynth").getChildFile("logs");
+       #endif
         const auto logs = folder.isDirectory() || folder.createDirectory().wasOk()
                               ? folder
                               : juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("CoolSynth-logs");

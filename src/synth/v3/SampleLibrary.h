@@ -24,7 +24,7 @@
     (SamplePack.h). A packed style is read from its pack, otherwise from its manifest. The folders sit
     under the library root: the folder named in COOLSYNTH_LIBRARY, else the one written in
     "CoolSynth/library.path" in the user's application data, else "CoolSynth/Library" in the common
-    application data.
+    application data (on macOS: library.path in ~/Library/Application Support/CoolSynth, else ~/Music/CoolSynth/Library).
 
     In memory a recording keeps its own depth and channels, losslessly: 16-bit recordings as 16-bit
     numbers, 24-bit ones packed in three bytes, mono as mono, with silent guard frames around it so

@@ -240,12 +240,23 @@ namespace coolsynth::synth::v3
         if (const auto fromEnvironment = juce::SystemStats::getEnvironmentVariable("COOLSYNTH_LIBRARY", {}); fromEnvironment.isNotEmpty())
             return juce::File(fromEnvironment);
 
-        const auto pointer = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("CoolSynth").getChildFile("library.path");
+        // On macOS JUCE's user application data is ~/Library itself, so the pointer goes in Application Support, and
+        // the library is ~/Music/CoolSynth/Library (D234): per user, and readable by sandboxed hosts such as GarageBand.
+        // The instrument zips hold a Library folder, so they unpack into ~/Music/CoolSynth as into ProgramData.
+        const auto pointer = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                               #if JUCE_MAC
+                                .getChildFile("Application Support")
+                               #endif
+                                .getChildFile("CoolSynth").getChildFile("library.path");
         if (pointer.existsAsFile())
             if (const auto written = pointer.loadFileAsString().trim(); written.isNotEmpty() && coolsynth::isFullPathHere(written))
                 return juce::File(written);
 
+       #if JUCE_MAC
+        return juce::File::getSpecialLocation(juce::File::userMusicDirectory).getChildFile("CoolSynth").getChildFile("Library");
+       #else
         return juce::File::getSpecialLocation(juce::File::commonApplicationDataDirectory).getChildFile("CoolSynth").getChildFile("Library");
+       #endif
     }
 
     SampleLibrary& SampleLibrary::instance()

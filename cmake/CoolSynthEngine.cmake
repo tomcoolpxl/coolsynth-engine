@@ -84,6 +84,11 @@ if(BUILD_TESTING AND COOLSYNTH_ENGINE_TESTS)
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3VoiceTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/StepSequencerTests.cpp")
     target_include_directories(CoolSynthEngineTests PRIVATE "${COOLSYNTH_ENGINE_ROOT}/tests")
+    # The Mac's audio-thread watch rebinds the program's own imports with fishhook (tests/fishhook, BSD licence).
+    if(APPLE)
+        target_sources(CoolSynthEngineTests PRIVATE "${COOLSYNTH_ENGINE_ROOT}/tests/fishhook/fishhook.c")
+        set_source_files_properties("${COOLSYNTH_ENGINE_ROOT}/tests/fishhook/fishhook.c" PROPERTIES COMPILE_OPTIONS -w)
+    endif()
     target_link_libraries(CoolSynthEngineTests
         PRIVATE
             coolsynth_engine

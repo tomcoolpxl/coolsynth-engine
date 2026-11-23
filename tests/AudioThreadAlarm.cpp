@@ -36,8 +36,8 @@ void operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); 
 
 // The wider watch (D222): the C heap through the debug runtime's allocation hook; locks, waits, sleeps and files by
 // pointing the import tables of the program and of Microsoft's C and C++ runtimes at counting stand-ins, each of which
-// calls the real function. Clang's RealtimeSanitizer and Tracktion's rtcheck do this by interposition on Linux and
-// macOS only. Calls through GetProcAddress, or from Windows' own libraries, are not seen.
+// calls the real function. Clang's RealtimeSanitizer and Tracktion's rtcheck do this by interposition from a library
+// they bring. Calls through GetProcAddress, or from Windows' own libraries, are not seen. The Mac's is below.
 #if defined(_WIN32)
  #ifndef NOMINMAX
   #define NOMINMAX
@@ -330,6 +330,234 @@ bool coolsynth::diag::watchBlockingCalls()
         patchImports(GetModuleHandleW(nullptr), windowsHeap, std::size(windowsHeap));
        #endif
         return enterCriticalSection.call != nullptr && sleepPlain.call != nullptr;
+    }();
+    return watching;
+}
+#elif defined(__APPLE__)
+ #include <algorithm>
+ #include <atomic>
+ #include <chrono>
+ #include <condition_variable>
+ #include <cstdarg>
+ #include <cstdio>
+ #include <cxxabi.h>
+ #include <dirent.h>
+ #include <dlfcn.h>
+ #include <execinfo.h>
+ #include <fcntl.h>
+ #include <iterator>
+ #include <mutex>
+ #include <pthread.h>
+ #include <sched.h>
+ #include <string>
+ #include <sys/mount.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ #include <mach-o/dyld.h>
+
+ #include "fishhook/fishhook.h"
+
+// The Mac's watch (CoolSynth's D272): the same calls, rebound in this program's own image with fishhook (Facebook, BSD
+// licence, tests/fishhook), as the Windows watch points import tables. Apple's libraries are reached only where this
+// program calls them: libc++'s mutex taking its pthread lock, or fopen opening its file, happen inside them and are not
+// seen, so libc++'s entry points that wait are rebound by their own names. JUCE is compiled into the program, so all of
+// its calls are seen. Interposing does not work from a program's own image since macOS 12, only from a library.
+namespace
+{
+    namespace diag = coolsynth::diag;
+
+    constexpr int keptStacks = 4, keptFrames = 12;
+    void* stacks[keptStacks][keptFrames] {};
+
+    void note(diag::BlockingCall kind) noexcept
+    {
+        const int index = diag::noteBlockingCall(kind);
+        if (index >= 0 && index < keptStacks)
+            backtrace(stacks[index], keptFrames);
+    }
+
+    template <typename Function>
+    struct Original
+    {
+        Function call = nullptr;
+    };
+
+    using NanosecondTime = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
+
+    Original<void* (*)(size_t)> heapMalloc;
+    Original<void* (*)(size_t, size_t)> heapCalloc;
+    Original<void* (*)(void*, size_t)> heapRealloc;
+    Original<void (*)(void*)> heapFree;
+    Original<int (*)(pthread_mutex_t*)> mutexLock;
+    Original<void (*)(std::mutex*)> stdMutexLock;
+    Original<void (*)(std::recursive_mutex*)> stdRecursiveMutexLock;
+    Original<void (*)(std::condition_variable*, std::unique_lock<std::mutex>*)> conditionWait;
+    Original<void (*)(std::condition_variable*, std::unique_lock<std::mutex>*, NanosecondTime)> conditionTimedWait;
+    Original<void (*)(const std::chrono::nanoseconds*)> sleepFor;
+    Original<int (*)(useconds_t)> sleepMicroseconds;
+    Original<int (*)(const timespec*, timespec*)> sleepNanoseconds;
+    Original<int (*)()> yield;
+    Original<int (*)(const char*, int, ...)> fileOpen;
+    Original<ssize_t (*)(int, void*, size_t)> fileRead;
+    Original<ssize_t (*)(int, const void*, size_t)> fileWrite;
+    Original<FILE* (*)(const char*, const char*)> fileOpenStream;
+    Original<int (*)(const char*, struct stat*)> fileStat;
+    Original<int (*)(int, struct stat*)> fileStatOpen;
+    Original<int (*)(const char*, int)> fileAccess;
+    Original<DIR* (*)(const char*)> folderOpen;
+    Original<int (*)(const char*, struct statfs*)> volumeStat;
+
+    // free(nullptr) does nothing, as on Windows (D222).
+    void countedFree(void* block)
+    {
+        if (block == nullptr)
+            return;
+        note(diag::BlockingCall::heap);
+        heapFree.call(block);
+    }
+    void* countedMalloc(size_t size) { note(diag::BlockingCall::heap); return heapMalloc.call(size); }
+    void* countedCalloc(size_t count, size_t size) { note(diag::BlockingCall::heap); return heapCalloc.call(count, size); }
+    void* countedRealloc(void* block, size_t size) { note(diag::BlockingCall::heap); return heapRealloc.call(block, size); }
+
+    // libc++'s members take their object first, as these do on arm64.
+    int countedMutexLock(pthread_mutex_t* m) { note(diag::BlockingCall::lock); return mutexLock.call(m); }
+    void countedStdMutexLock(std::mutex* m) { note(diag::BlockingCall::lock); stdMutexLock.call(m); }
+    void countedStdRecursiveMutexLock(std::recursive_mutex* m) { note(diag::BlockingCall::lock); stdRecursiveMutexLock.call(m); }
+    void countedConditionWait(std::condition_variable* c, std::unique_lock<std::mutex>* l)
+    {
+        note(diag::BlockingCall::wait);
+        conditionWait.call(c, l);
+    }
+    void countedConditionTimedWait(std::condition_variable* c, std::unique_lock<std::mutex>* l, NanosecondTime until)
+    {
+        note(diag::BlockingCall::wait);
+        conditionTimedWait.call(c, l, until);
+    }
+
+    // JUCE's Thread::sleep is std::this_thread::sleep_for; its yield is sched_yield, which Windows counts as Sleep(0).
+    void countedSleepFor(const std::chrono::nanoseconds* d) { note(diag::BlockingCall::sleep); sleepFor.call(d); }
+    int countedSleepMicroseconds(useconds_t us) { note(diag::BlockingCall::sleep); return sleepMicroseconds.call(us); }
+    int countedSleepNanoseconds(const timespec* t, timespec* left) { note(diag::BlockingCall::sleep); return sleepNanoseconds.call(t, left); }
+    int countedYield() { note(diag::BlockingCall::sleep); return yield.call(); }
+
+    // open is variadic: its mode comes only with O_CREAT, and is passed on as it came.
+    int countedOpen(const char* path, int flags, ...)
+    {
+        note(diag::BlockingCall::file);
+        int mode = 0;
+        if ((flags & O_CREAT) != 0)
+        {
+            va_list rest;
+            va_start(rest, flags);
+            mode = va_arg(rest, int);
+            va_end(rest);
+        }
+        return fileOpen.call(path, flags, mode);
+    }
+    ssize_t countedRead(int f, void* data, size_t size) { note(diag::BlockingCall::file); return fileRead.call(f, data, size); }
+    ssize_t countedWrite(int f, const void* data, size_t size) { note(diag::BlockingCall::file); return fileWrite.call(f, data, size); }
+    FILE* countedOpenStream(const char* path, const char* mode) { note(diag::BlockingCall::file); return fileOpenStream.call(path, mode); }
+    int countedStat(const char* path, struct stat* s) { note(diag::BlockingCall::file); return fileStat.call(path, s); }
+    int countedStatOpen(int f, struct stat* s) { note(diag::BlockingCall::file); return fileStatOpen.call(f, s); }
+    int countedAccess(const char* path, int mode) { note(diag::BlockingCall::file); return fileAccess.call(path, mode); }
+    DIR* countedOpenFolder(const char* path) { note(diag::BlockingCall::file); return folderOpen.call(path); }
+    int countedVolumeStat(const char* path, struct statfs* s) { note(diag::BlockingCall::file); return volumeStat.call(path, s); }
+
+    struct Hook
+    {
+        const char* name; // as the linker knows it, without its leading underscore
+        void** original;
+        void* counted;
+    };
+
+    template <typename Function>
+    Hook hook(const char* name, Original<Function>& original, Function counted)
+    {
+        return { name, reinterpret_cast<void**>(&original.call), reinterpret_cast<void*>(counted) };
+    }
+}
+
+const char* coolsynth::diag::firstBlockingCallers()
+{
+    static std::string text;
+    text.clear();
+    const int count = std::min(keptStacks, audioBlockingCalls.count.load());
+    for (int i = 0; i < count; ++i)
+    {
+        text += std::string("\n  [") + blockingCallName(audioBlockingCalls.firstKinds[static_cast<std::size_t>(i)].load()) + "] ";
+        for (int f = 1; f < keptFrames && stacks[i][f] != nullptr; ++f) // frame 0 is note itself
+        {
+            Dl_info info {};
+            if (dladdr(stacks[i][f], &info) != 0 && info.dli_sname != nullptr)
+            {
+                int status = 0;
+                char* plain = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &status);
+                text += status == 0 && plain != nullptr ? plain : info.dli_sname;
+                std::free(plain);
+            }
+            else
+                text += "?";
+            text += " < ";
+        }
+    }
+    return text.c_str();
+}
+
+bool coolsynth::diag::watchBlockingCalls()
+{
+    static const bool watching = []
+    {
+        Hook hooks[] {
+            hook("malloc", heapMalloc, &countedMalloc),
+            hook("calloc", heapCalloc, &countedCalloc),
+            hook("realloc", heapRealloc, &countedRealloc),
+            hook("free", heapFree, &countedFree),
+            hook("pthread_mutex_lock", mutexLock, &countedMutexLock),
+            hook("_ZNSt3__15mutex4lockEv", stdMutexLock, &countedStdMutexLock),
+            hook("_ZNSt3__115recursive_mutex4lockEv", stdRecursiveMutexLock, &countedStdRecursiveMutexLock),
+            hook("_ZNSt3__118condition_variable4waitERNS_11unique_lockINS_5mutexEEE", conditionWait, &countedConditionWait),
+            hook("_ZNSt3__118condition_variable15__do_timed_waitERNS_11unique_lockINS_5mutexEEENS_6chrono10time_pointINS5_"
+                 "12system_clockENS5_8durationIxNS_5ratioILl1ELl1000000000EEEEEEE", conditionTimedWait, &countedConditionTimedWait),
+            hook("_ZNSt3__111this_thread9sleep_forERKNS_6chrono8durationIxNS_5ratioILl1ELl1000000000EEEEE", sleepFor, &countedSleepFor),
+            hook("usleep", sleepMicroseconds, &countedSleepMicroseconds),
+            hook("nanosleep", sleepNanoseconds, &countedSleepNanoseconds),
+            hook("sched_yield", yield, &countedYield),
+            hook("open", fileOpen, &countedOpen),
+            hook("read", fileRead, &countedRead),
+            hook("write", fileWrite, &countedWrite),
+            hook("fopen", fileOpenStream, &countedOpenStream),
+            hook("stat", fileStat, &countedStat),
+            hook("fstat", fileStatOpen, &countedStatOpen),
+            hook("access", fileAccess, &countedAccess),
+            hook("opendir", folderOpen, &countedOpenFolder),
+            hook("statfs", volumeStat, &countedVolumeStat),
+        };
+
+        // Each real function first, from the libraries, so a stand-in other threads reach while the rebinding runs never
+        // calls a null pointer (fishhook writes its own copy only just before it points the slot elsewhere).
+        // One a library does not have is left alone.
+        rebinding rebindings[std::size(hooks)] {};
+        std::size_t rebound = 0;
+        for (const auto& h : hooks)
+            if ((*h.original = dlsym(RTLD_DEFAULT, h.name)) != nullptr)
+                rebindings[rebound++] = { h.name, h.counted, nullptr };
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+
+        // This program's own image: the one holding this function.
+        Dl_info self {};
+        if (dladdr(reinterpret_cast<const void*>(&coolsynth::diag::watchBlockingCalls), &self) == 0)
+            return false;
+        for (uint32_t i = 0; i < _dyld_image_count(); ++i)
+            if (_dyld_get_image_header(i) == self.dli_fbase)
+            {
+                rebind_symbols_image(const_cast<void*>(self.dli_fbase), _dyld_get_image_vmaddr_slide(i), rebindings, rebound);
+                break;
+            }
+
+        // fishhook leaves a slot it could not make writable as it was, and says nothing: the program's own address of
+        // pthread_mutex_lock comes from the same slot its calls go through, so it must now be the counting one.
+        void* volatile seen = reinterpret_cast<void*>(&::pthread_mutex_lock);
+        return seen == reinterpret_cast<void*>(&countedMutexLock);
     }();
     return watching;
 }
