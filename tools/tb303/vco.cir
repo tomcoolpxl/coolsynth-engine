@@ -15,10 +15,11 @@
 * Parameters: cv (volts at the start), cv2 and tcv (the voltage after tcv seconds), slide (1: IC12 puts C35 on the
 * ladder, a 22 ms RC; 0: C35 follows IC11b's output), tm4 (TUNE trimmer TM4, 47k B, 0..1 from 5.333 V to 12 V),
 * tm5 (WIDTH trimmer TM5, 4.7k, 0..1 of its resistance), tune (the TUNING knob VR2, 50k B, 0..1 from ground to
-* 5.333 V; its top end read as 5.333 V), tend.
+* 5.333 V; its top end read as 5.333 V), c11 (C11, 1 uF electrolytic as printed; fitted to Din Sync's real unit by
+* the whole voice, its square at low C: 0.82 uF, harmonics 2 to 10 within 0.4 dB), tend.
 * tm4 and tm5 as calibrate.py sets them by page 7's procedure: A at 110.0 Hz, low C to high C 2:1, to high C
 * transposed up 4.002:1 (with the models as fitted below).
-.param cv=2.75 cv2=2.75 tcv=1 slide=0 tm4=0.5719 tm5=0.7386 tune=0.5 tend=0.05
+.param cv=2.75 cv2=2.75 tcv=1 slide=0 tm4=0.5719 tm5=0.7386 tune=0.5 c11=1u tend=0.05
 .param rtm4a={max(47k*tm4, 1)} rtm4b={max(47k*(1-tm4), 1)} rtm5={max(4.7k*tm5, 1)}
 .param rv2a={max(50k*(1-tune), 1)} rv2b={max(50k*tune, 1)}
 
@@ -111,7 +112,7 @@ R35 nsaw nb8 100k
 C10 nsaw nc10 10n
 R34 nc10 nb8 10k
 R45 vcc ne8 22k
-C11 ne8 0 1u
+C11 ne8 0 {c11}
 Q8 nsq nb8 ne8 QPM
 R36 nsq vr 10k
 

@@ -11,6 +11,7 @@
 .param tm4=0.5719
 .param tm5=0.7386
 .param tune=0.5
+.param c11=1u
 .param tend=0.05
 .param rtm4a={max(47k*tm4, 1)}
 .param rtm4b={max(47k*(1-tm4), 1)}
@@ -112,7 +113,7 @@ R35 nsaw nb8 100k
 C10 nsaw nc10 10n
 R34 nc10 nb8 10k
 R45 vcc ne8 22k
-C11 ne8 0 1u
+C11 ne8 0 {c11}
 Q8 nsq nb8 ne8 QPM
 R36 nsq vr 10k
 .ends

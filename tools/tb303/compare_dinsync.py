@@ -5,7 +5,8 @@ The recordings (dinsync.info, 2010; no licence stated) are kept outside the repo
 Each SET-xx.wav holds 16 low C notes, 3 s apart from 1.14 s: per knob position, an unaccented saw, an accented saw,
 an unaccented square, an accented square.
 
-Usage: python -I tools/tb303/compare_dinsync.py <folder> SET-A1 13 sim.csv [--t0 0.02] [--periods 8]
+Usage: python -I tools/tb303/compare_dinsync.py <folder> SET-A1 13 sim.csv [--t0 0.02] [--periods 8] [--ton 0.01]
+Start the note late (ton 0.4 s): C11 needs some 0.2 s to settle, and a real 303's VCO never stops.
   sim.csv: render.py's CSV of voice.cir with nout, the note's gate rising at ton (default 10 ms).
 """
 import argparse
