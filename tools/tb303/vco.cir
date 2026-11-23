@@ -1,0 +1,123 @@
+* Roland TB-303 VCO, from the service notes (First Edition, 1982, p. 5; D275): the pitch's slide, the exponential
+* converter, the saw's capacitor and its reset, the source follower and the square's shaper. The reference for
+* CoolSynth 303's VCO.
+*
+* Rails as ideal sources: 12 V (the filled arrows), 5.333 V (the crossed circles, IC16 pin 7).
+* Transistors: the 2SC945(P) and 2SA733(P) as the 808 netlists' stand-ins; the dual 2SC1583 (Q26) as two matched
+* NPNs (no published model: hFE >= 500); the 2SK30(O) as an N-JFET of Idss 1 mA (rank O: 0.6 to 1.4 mA); the 1SS133
+* and 1S2473 as the standard 1N4148; the AN6562 (an LM358 in effect) as a single-pole 1 MHz op-amp whose output
+* swings from 0 to 10.5 V on 12 V.
+*
+* The CPU's note: the 6-bit ladder R74 to R90 (100k and 200k, 0.1 %) from IC10's 5.333 V buffers, one twelfth of a
+* volt a step, taken as its Thevenin equivalent, the code's voltage behind 100 kOhm. The A key unshifted is code 33,
+* 2.75 V (CV OUT at TUNE); the lowest C 1 V, the highest 5 V.
+*
+* Parameters: cv (volts at the start), cv2 and tcv (the voltage after tcv seconds), slide (1: IC12 puts C35 on the
+* ladder, a 22 ms RC; 0: C35 follows IC11b's output), tm4 (TUNE trimmer TM4, 47k B, 0..1 from 5.333 V to 12 V),
+* tm5 (WIDTH trimmer TM5, 4.7k, 0..1 of its resistance), tune (the TUNING knob VR2, 50k B, 0..1 from ground to
+* 5.333 V; its top end read as 5.333 V), tend.
+* tm4 and tm5 as calibrate.py sets them by page 7's procedure: A at 110.0 Hz, low C to high C 2:1, to high C
+* transposed up 4.002:1.
+.param cv=2.75 cv2=2.75 tcv=1 slide=0 tm4=0.5604 tm5=0.7379 tune=0.5 tend=0.05
+.param rtm4a={max(47k*tm4, 1)} rtm4b={max(47k*(1-tm4), 1)} rtm5={max(4.7k*tm5, 1)}
+.param rv2a={max(50k*(1-tune), 1)} rv2b={max(50k*tune, 1)}
+
+* The 2SC945 and 2SA733 (no published models) as Fairchild's 2N3904 and 2N3906 from their datasheets, with their
+* storage times and low-current gain: the reset (Q24, Q25, Q27, a thyristor) lets go only through them.
+.model QEM NPN(IS=6.734f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2
++ ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p ITF=.4
++ VTF=4 XTF=2 RB=10)
+.model QPM PNP(IS=1.41f XTI=3 EG=1.11 VAF=18.7 BF=180.7 NE=1.5 ISE=0 IKF=80m XTB=1.5 BR=4.977 NC=2 ISC=0 IKR=0
++ RC=2.5 CJC=9.728p MJC=.5776 VJC=.75 FC=.5 CJE=8.063p MJE=.3677 VJE=.75 TR=33.42n TF=179.3p ITF=.4 VTF=4 XTF=6
++ RB=10)
+.model Q1583 NPN(IS=10f BF=500 BR=4 CJE=5p CJC=2.5p)
+.model JFO NJF(VTO=-1.0 BETA=1m LAMBDA=2m CGS=8p CGD=3p)
+.model DEM D(IS=2.52n N=1.752 RS=0.568 CJO=2p)
+.model DCL D(IS=1e-12 N=1)
+.model SWI SW(VT=0.5 VH=0.1 RON=200 ROFF=1G)
+
+VCC vcc 0 12
+VR vr 0 5.333
+
+* The ladder's voltage behind its 100 kOhm.
+VDAC ndac0 0 PWL(0 {cv} {tcv} {cv} {tcv+1u} {cv2})
+RDAC ndac0 ndac 100k
+
+* The slide: IC12's switch 8-9 puts C35 on the ladder's output while a slide plays; switch 10-11 holds C35 at
+* IC11b's output otherwise, so a slide starts from the pitch that sounds (Q29 and Q30 set the two oppositely; here
+* the slide parameter does).
+VSL nsl 0 {slide}
+VNS nns 0 {1-slide}
+S8 ndac n35 nsl 0 SWI
+S10 n35 ncv nns 0 SWI
+C35 n35 0 0.22u
+
+* IC11b, a follower (R107 2.2k), its output clamped by D30 to ground and D31 to 5.333 V: the CV.
+GB 0 ib ndac nm11b 1m
+RIB ib 0 1e8
+CIB ib 0 159.15p
+BB ncv 0 V=v(ib)
+DCPB ib ncpb DCL
+VCPB ncpb 0 9.95
+DCNB ncnb ib DCL
+VCNB ncnb 0 0.57
+R107 ncv nm11b 2.2k
+D31 ncv vr DEM
+D30 0 ncv DEM
+
+* The exponential converter: Q26's left half sinks the reference current (R103 from 12 V, R102 from TM4's wiper)
+* at 5.333 V, IC11a driving the shared emitters through R104 (C34 across IC11a); the right half's base is the CV
+* through TM5 and R106 over the posistor R100 (560 ohm, taken at 25 C) to 5.333 V, and TUNING through R118.
+R103 vcc nref 220k
+RTM4A vr ntm4 {rtm4a}
+RTM4B ntm4 vcc {rtm4b}
+R102 ntm4 nref 100k
+GA 0 ia vr nref 1m
+RIA ia 0 1e8
+CIA ia 0 159.15p
+BA n11a 0 V=v(ia)
+DCPA ia ncpa DCL
+VCPA ncpa 0 9.95
+DCNA ncna ia DCL
+VCNA ncna 0 0.57
+C34 n11a nref 1n
+R104 n11a nem 2.2k
+Q26A nref vr nem Q1583
+Q26B nc33 nbase nem Q1583
+RTM5 ncv n5 {rtm5}
+R106 n5 nbase 27k
+R100 nbase vr 560
+R118 nbase ntune 100k
+RV2A vr ntune {rv2a}
+RV2B ntune 0 {rv2b}
+
+* The saw: Q26B discharges C33 (0.01 uF) from about 12 V; at about 5.5 V Q25 turns on (its base at Q24's diode over
+* R101 to 5.333 V), pulls Q27's base, and Q27 through D25 lifts Q24's node and with it, through Q25, C33 back up.
+C33 nc33 0 10n
+Q25 nb27 nb nc33 QEM
+Q27 nk nb27 vcc QPM
+D25 nk nb DEM
+Q24 nb nb ne24 QEM
+R101 ne24 vr 10k
+
+* Q28, a source follower: the saw.
+J28 vcc nc33 nsaw JFO
+R105 nsaw 0 10k
+
+* The square: Q8 (PNP), its base from the saw through R35 (100k) and, for the edges, C10 and R34 (10k); its emitter
+* from 12 V through R45 (22k), held by C11 (1 uF); its collector over R36 (10k) to 5.333 V.
+R35 nsaw nb8 100k
+C10 nsaw nc10 10n
+R34 nc10 nb8 10k
+R45 vcc ne8 22k
+C11 ne8 0 1u
+Q8 nsq nb8 ne8 QPM
+R36 nsq vr 10k
+
+* The start: the thyristor's latched state is also a DC solution (the circuit's power-up kicks it out); the render
+* starts on the ramp instead.
+.ic v(nc33)=8 v(nb)=5.9
+
+.options method=trap reltol=1e-5 abstol=1e-12 vntol=1e-7
+.tran 0.2u {tend} 0 0.2u
+.end
