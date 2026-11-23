@@ -1,0 +1,301 @@
+* The whole Roland TB-303 voice (D275), built by voice.py from vco.cir, vcf.cir and vca.cir: do not edit, edit
+* the stages and run voice.py again. The VCO's saw or square (sq) through the WAVEFORM switch into the filter;
+* the envelope into ENV MOD; the ACCENT knob's wiper into D24; the filter's output and the RESONANCE wiper into
+* the VCA. The note: cv (volts, 1 V an octave, the A key 2.75 V), the gate from ton to toff, acc (12 on an accent),
+* and every knob as the stages name them (cutoff, res, envmod, decay, accent, tune).
+.param sq=0
+.param cv=2.75
+.param cv2=2.75
+.param tcv=1
+.param slide=0
+.param tm4=0.5719
+.param tm5=0.7386
+.param tune=0.5
+.param tend=0.05
+.param rtm4a={max(47k*tm4, 1)}
+.param rtm4b={max(47k*(1-tm4), 1)}
+.param rtm5={max(4.7k*tm5, 1)}
+.param rv2a={max(50k*(1-tune), 1)}
+.param rv2b={max(50k*tune, 1)}
+.param cutoff=0.5
+.param res=1
+.param envmod=0
+.param acc=0
+.param tm3=0.1727
+.param ka=3.47
+.param tcut={(exp(ka*cutoff)-1)/(exp(ka)-1)}
+.param tenv={(exp(ka*envmod)-1)/(exp(ka)-1)}
+.param rcut1={max(50k*tcut, 1)}
+.param rcut3={max(50k*(1-tcut), 1)}
+.param renv1={max(50k*tenv, 1)}
+.param renv3={max(50k*(1-tenv), 1)}
+.param rres1={max(50k*res, 1)}
+.param rres3={max(50k*(1-res), 1)}
+.param rtm3={max(470k*tm3, 1)}
+.param decay=0.5
+.param accent=0.5
+.param ton=10m
+.param toff=72.5m
+.param taoff=135m
+.param tdec={(exp(ka*decay)-1)/(exp(ka)-1)}
+.param rdec={max(1Meg*tdec, 1)}
+.param racc1={max(50k*accent, 1)}
+.param racc3={max(50k*(1-accent), 1)}
+.model QEM NPN(IS=39f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2
++ ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p ITF=.4
++ VTF=4 XTF=2 RB=10)
+.model QPM PNP(IS=39f XTI=3 EG=1.11 VAF=18.7 BF=300 NE=1.5 ISE=0 IKF=80m XTB=1.5 BR=4.977 NC=2 ISC=0 IKR=0
++ RC=2.5 CJC=9.728p MJC=.5776 VJC=.75 FC=.5 CJE=8.063p MJE=.3677 VJE=.75 TR=33.42n TF=179.3p ITF=.4 VTF=4 XTF=6
++ RB=10)
+.model Q1583 NPN(IS=10f BF=500 BR=4 CJE=5p CJC=2.5p)
+.model JFO NJF(VTO=-1.0 BETA=1m LAMBDA=2m CGS=8p CGD=3p)
+.model DEM D(IS=2.52n N=1.752 RS=0.568 CJO=2p)
+.model DCL D(IS=1e-12 N=1)
+.model SWI SW(VT=0.5 VH=0.1 RON=200 ROFF=1G)
+.model QDUAL NPN(IS=10f BF=500 BR=4 VAF=100 CJE=5p CJC=2.5p TF=400p)
+.model JFY NJF(VTO=-1.5 BETA=0.89m LAMBDA=2m CGS=8p CGD=3p)
+.model SWV SW(VT=6 VH=0.5 RON=200 ROFF=1G)
+
+VCC vcc 0 12
+VR vr 0 5.333
+
+.subckt VCO vcc vr nsaw nsq
+VDAC ndac0 0 PWL(0 {cv} {tcv} {cv} {tcv+1u} {cv2})
+RDAC ndac0 ndac 100k
+VSL nsl 0 {slide}
+VNS nns 0 {1-slide}
+S8 ndac n35 nsl 0 SWI
+S10 n35 ncv nns 0 SWI
+C35 n35 0 0.22u
+GB 0 ib ndac nm11b 1m
+RIB ib 0 1e8
+CIB ib 0 159.15p
+BB ncv 0 V=v(ib)
+DCPB ib ncpb DCL
+VCPB ncpb 0 9.95
+DCNB ncnb ib DCL
+VCNB ncnb 0 0.57
+R107 ncv nm11b 2.2k
+D31 ncv vr DEM
+D30 0 ncv DEM
+R103 vcc nref 220k
+RTM4A vr ntm4 {rtm4a}
+RTM4B ntm4 vcc {rtm4b}
+R102 ntm4 nref 100k
+GA 0 ia vr nref 1m
+RIA ia 0 1e8
+CIA ia 0 159.15p
+BA n11a 0 V=v(ia)
+DCPA ia ncpa DCL
+VCPA ncpa 0 9.95
+DCNA ncna ia DCL
+VCNA ncna 0 0.57
+C34 n11a nref 1n
+R104 n11a nem 2.2k
+Q26A nref vr nem Q1583
+Q26B nc33 nbase nem Q1583
+RTM5 ncv n5 {rtm5}
+R106 n5 nbase 27k
+R100 nbase vr 560
+R118 nbase ntune 100k
+RV2A vr ntune {rv2a}
+RV2B ntune 0 {rv2b}
+C33 nc33 0 10n
+Q25 nb27 nb nc33 QEM
+Q27 nk nb27 vcc QPM
+D25 nk nb DEM
+Q24 nb nb ne24 QEM
+R101 ne24 vr 10k
+J28 vcc nc33 nsaw JFO
+R105 nsaw 0 10k
+R35 nsaw nb8 100k
+C10 nsaw nc10 10n
+R34 nc10 nb8 10k
+R45 vcc ne8 22k
+C11 ne8 0 1u
+Q8 nsq nb8 ne8 QPM
+R36 nsq vr 10k
+.ends
+
+.subckt VCF vcc vr nin nenv nacc ntp6 nvcf nresw
+R95 vcc vf 100
+C28 vf 0 47u
+R62 nin n17 220k
+C17 n17 nb12l 1u
+R68 vr n16 2.2k
+C16 n16 0 10u
+R70 nb12l n16 2.2k
+R98 nb12r n16 2.2k
+Q12L nl1 nb12l ne12 QDUAL
+Q12R nr1 nb12r ne12 QDUAL
+Q13 nl2 nl2 nl1 QEM
+Q14 nl3 nl3 nl2 QEM
+Q16 nl4 nl4 nl3 QEM
+Q15 nr2 nr2 nr1 QEM
+Q17 nr3 nr3 nr2 QEM
+Q23 nr4 nr4 nr3 QEM
+C18 nl1 nr1 0.018u
+C19 nl2 nr2 0.033u
+C24 nl3 nr3 0.033u
+C26 nl4 nr4 0.033u
+Q22L vf nb22 nl4 QDUAL
+Q22R vf nb22 nr4 QDUAL
+R115 vf nb22 10k
+C30 nb22 0 10u
+R116 vr nbias 10k
+C29 nbias 0 1u
+C27 nr4 nb21l 0.1u
+C25 nl4 nb21r 0.1u
+R113 nb21l nbias 100k
+R114 nb21r nbias 100k
+Q21L nc21l nb21l ne21 QDUAL
+Q21R nc21r nb21r ne21 QDUAL
+R111 vf nc21l 22k
+R110 vf nc21r 22k
+R112 nbias nb20 10k
+R109 nb20 0 10k
+Q20 ne21 nb20 ne20 QEM
+R108 ne20 0 2.2k
+Q19 vf nc21r ntp6 QEM
+R96 ntp6 0 10k
+C14 ntp6 nvcf 1u
+RRES3 nvcf nresw {rres3}
+RRES1 nresw 0 {rres1}
+C15 nresw n15 1u
+R67 n15 nb18 2.2k
+R66 vr n22 100k
+C22 n22 0 1u
+R99 n22 nb18 100k
+Q18 vcc nb18 ne18 QEM
+R94 ne18 0 10k
+C23 ne18 n23 1u
+R97 n23 nb12r 10k
+R69 ne12 nc11 2.2k
+Q11 nc11 nb11 nvq9 QEM
+R65 vr nb9 10k
+R64 nb9 0 10k
+Q9 0 nb9 nvq9 QPM
+Q10 0 nb10 nb11 QPM
+RCUT3 vcc ncutw {rcut3}
+RCUT1 ncutw ncut1 {rcut1}
+R47 ncut1 nvq9 10k
+R73 ncutw ntm3 100k
+RTM3 ntm3 nb11 {rtm3}
+R71 nb10 nvq9 2.2k
+RENV3 nenv nenvw {renv3}
+RENV1 nenvw n61 {renv1}
+R61 n61 nvq9 10k
+R63 nenvw nb10 220k
+D24 nacc nd24 DEM
+R46 nd24 nres1b 47k
+RRESB1 nres1b nresbw {rres1}
+RRESB3 nresbw n13 {rres3}
+C13 n13 0 1u
+R72 nresbw nb10 100k
+.ends
+
+.subckt VCA vcc vr nvcf nresw nenv naccw nout
+VG ng 0 PWL(0 0 {ton} 0 {ton+1u} 5 {toff} 5 {toff+1u} 0)
+R146 ng nb37 22k
+R144 nb37 0 10k
+Q37 nc37 nb37 0 QEM
+R147 vcc ne36 22
+R142 vcc nb36 10k
+C72 vcc nb36 10u
+R143 nb36 nc37 10k
+Q36 ngate nb36 ne36 QPM
+R145 ngate 0 10k
+R150 vcc ne38 22
+C55 ne38 0 47u
+R149 vcc nb38 10k
+R148 nb38 n54 10k
+C54 n54 nc37 0.047u
+Q38 nc38 nb38 ne38 QPM
+R151 nc38 0 22k
+D37 nc38 n152 DEM
+R152 n152 nc62 100
+C62 nc62 0 1u
+Q41 vcc nc62 ne41 QEM
+Q40 vcc ne41 nenv QEM
+J39 nenv 0 0 JFY
+VACC nacc 0 PWL(0 0 {ton} 0 {ton+1u} {acc} {taoff} {acc} {taoff+1u} 0)
+R138 nc62 ndec 68k
+RDEC ndec nn4 {rdec}
+S12B ndec nn4 nacc 0 SWV
+D28 nn4 nn3 DEM
+D29 nn3 nn2 DEM
+R117 vr nn2 22k
+D26 nn2 0 DEM
+S12A nenv nacc3 nacc 0 SWV
+RACC3 nacc3 naccw {racc3}
+RACC1 naccw 0 {racc1}
+R119 naccw n36 47k
+C36 n36 0 0.033u
+R120 n36 n27 22k
+R126 vr nm 2.2k
+C37 nm 0 10u
+R125 nm nin2 2.2k
+R124 nm nin3 2.2k
+C21 nvcf n21 0.01u
+R121 n21 nin3 220k
+C22 nresw n22 0.01u
+R122 n22 nin3 100k
+D35 ngate n35 DEM
+R133 n35 nx31 2.2k
+R131 nx31 ne31 220k
+Q31 niabc nb31 ne31 QPM
+R123 vcc nb31 1.5Meg
+C42 nb31 0 1u
+R132 nb31 nc32 100
+D36 nc38 n36d DEM
+R134 n36d nb32 22k
+C41 nb32 0 0.1u
+Q32 nc32 nb32 ne32 QEM
+R130 ne32 0 100
+D27V n27 niabc DEM
+XIC15 niabc nin2 nin3 vcc 0 nota nota nvout vcc BA662
+R128 nota nn 220k
+R127 nota nn 47k
+R129 nn nq 22k
+R162 vr nq 2.2k
+C40 nq 0 10u
+C38 nvout nout 1u
+RMIX nout 0 100k
+.ends
+
+.subckt BA662 p1 p2 p3 p4 p5 p6 p7 p8 p9
+Q1A p1 p1 e1a NI
+R1A e1a p5 500
+Q1B t p1 e1b NI
+R1B e1b p5 500
+Q2A ca p2 t NI
+Q2B cb p3 t NI
+Q3A ca b3 p9 PL
+Q3B b3 b3 p9 PL
+Q5B x ca b3 PL
+Q4A cb b4 p9 PL
+Q4B b4 b4 p9 PL
+Q5A p6 cb b4 PL
+Q6A x b6 p5 NI
+Q6B b6 b6 p5 NI
+Q7B p6 x b6 NI
+R20 p4 b9 50k
+Q9B b9 b9 p5 NI
+Q9A e7 b9 p5 NI
+Q7A p9 p7 e7 NI
+Q10A p5 e7 p8 PL
+R21 p9 p8 11k
+.model NI NPN(IS=1f BF=150 VAF=100 CJE=1p CJC=0.5p TF=0.5n)
+.model PL PNP(IS=1f BF=50 VAF=50 CJE=1p CJC=2p TF=20n)
+.ends
+
+XVCO vcc vr nsaw nsq VCO
+* The WAVEFORM switch.
+BWAVE nwave 0 V = {sq} > 0.5 ? v(nsq) : v(nsaw)
+XVCF vcc vr nwave nenv naccw ntp6 nvcf nresw VCF
+XVCA vcc vr nvcf nresw nenv naccw nout VCA
+
+.ic v(xvco.nc33)=8 v(xvco.nb)=5.9
+.options method=trap reltol=1e-5 abstol=1e-12 vntol=1e-7
+.tran 2u {tend} 0 2u
+.end
