@@ -29,12 +29,12 @@
 *
 * Parameters: cutoff, res, envmod (each the knob's turn, 0..1), env (volts at ENV MOD's top; the envelope at rest
 * is near 0 V), acc (volts at D24's anode: the ACCENT knob's wiper), tm3 (0..1 of TM3's resistance), freq (the input
-* saw's frequency, Hz; 0 for none), sq (1: the input is a square from 5.333 to 8.8 V instead), tend. tm3 as calibrate.py sets it by
+* saw's frequency, Hz; 0 for none), env2 and acc2 (env and acc after tstep seconds; -1 keeps them), sq (1: the input is a square from 5.333 to 8.8 V instead), tend. tm3 as calibrate.py sets it by
 * page 7: a 2.000 ms ring at TP6. Fitted to Din Sync's real unit by the whole voice (compare_dinsync.py, SET-A1
 * at cutoff 25 to 100 %): tm3 0.35, harmonics 2 to 8 within 0.7 dB on average at three positions, 2.1 dB at 75 %.
 * The 12 V rail: IC16 makes it from the 5.333 V reference times 1 + R178 / R179 (2.2k / 1.8k), 11.85 V, not the 12 V
 * drawn (D275); with 5 % resistors a unit may sit anywhere from about 11.4 to 12.3 V. vcc sets it.
-.param cutoff=0.5 res=1 envmod=0 env=0 acc=0 tm3=0.1642 freq=65.406 sq=0 vcc=11.851 tend=0.2
+.param cutoff=0.5 res=1 envmod=0 env=0 acc=0 env2=-1 acc2=-1 tstep=1 tm3=0.1642 freq=65.406 sq=0 vcc=11.851 tend=0.2
 .param ka=3.47
 .param tcut={(exp(ka*cutoff)-1)/(exp(ka)-1)} tenv={(exp(ka*envmod)-1)/(exp(ka)-1)}
 .param rcut1={max(50k*tcut, 1)} rcut3={max(50k*(1-tcut), 1)}
@@ -140,7 +140,7 @@ RTM3 ntm3 nb11 {rtm3}
 R71 nb10 nvq9 2.2k
 
 * ENV MOD: the envelope at pin 3, R61 (10k) to VQ9 at pin 1, the wiper through R63 (220k) into Q10's base.
-VENV nenv 0 {env}
+VENV nenv 0 PWL(0 {env} {tstep} {env} {tstep+1u} {env2 < 0 ? env : env2})
 RENV3 nenv nenvw {renv3}
 RENV1 nenvw n61 {renv1}
 R61 n61 nvq9 10k
@@ -148,7 +148,7 @@ R63 nenvw nb10 220k
 
 * The accent's sweep: D24 from the ACCENT wiper, R46 (47k), RESONANCE's second gang (pin 1 at R46, pin 3 at C13,
 * its wiper turning with the first gang) and C13; the wiper through R72 (100k) into Q10's base.
-VACC nacc 0 {acc}
+VACC nacc 0 PWL(0 {acc} {tstep} {acc} {tstep+1u} {acc2 < 0 ? acc : acc2})
 D24 nacc nd24 DEM
 R46 nd24 nres1b 47k
 RRESB1 nres1b nresbw {rres1}

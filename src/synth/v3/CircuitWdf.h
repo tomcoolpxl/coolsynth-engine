@@ -115,11 +115,15 @@ namespace coolsynth::synth::v3::wdf
             devices[static_cast<std::size_t>(deviceCount - 1)].offset = volts;
         }
 
-        /** An NPN transistor (Ebers-Moll, transport form), as two ports: base-emitter and collector-emitter. */
-        void addTransistor(int collector, int base, int emitter, double saturation, double betaF, double betaR, double thermal)
+        /** An NPN transistor (Ebers-Moll, transport form), as two ports: base-emitter and collector-emitter. With
+            earlyVolts, its forward Early effect as SPICE's Gummel-Poon has it (the transport current times
+            1 - Vbc / VAF; D279); 0, none (the 808's circuits, bit for bit as before). */
+        void addTransistor(int collector, int base, int emitter, double saturation, double betaF, double betaR, double thermal,
+                           double earlyVolts = 0.0)
         {
             Device& d = devices[static_cast<std::size_t>(deviceCount++)];
             d.isTransistor = true;
+            d.inverseEarly = earlyVolts > 0.0 ? 1.0 / earlyVolts : 0.0;
             d.saturation = saturation;
             d.betaF = betaF;
             d.betaR = betaR;
@@ -134,9 +138,10 @@ namespace coolsynth::synth::v3::wdf
         }
 
         /** A PNP transistor: the NPN's equations with every voltage and current turned round. */
-        void addPnpTransistor(int collector, int base, int emitter, double saturation, double betaF, double betaR, double thermal)
+        void addPnpTransistor(int collector, int base, int emitter, double saturation, double betaF, double betaR, double thermal,
+                              double earlyVolts = 0.0)
         {
-            addTransistor(collector, base, emitter, saturation, betaF, betaR, thermal);
+            addTransistor(collector, base, emitter, saturation, betaF, betaR, thermal, earlyVolts);
             devices[static_cast<std::size_t>(deviceCount - 1)].polarity = -1.0;
         }
 
@@ -401,6 +406,7 @@ namespace coolsynth::synth::v3::wdf
             int port[2] {}, slot[2] {};
             // Derived once, for the solver: 1 / VT, 1 / betaF, 1 / betaR, 1 + 1 / betaR, pnjlim's critical voltage.
             double inverseThermal = 1.0 / 0.02585, inverseBetaF = 0.01, inverseBetaR = 1.0, reverseFactor = 2.0, critical = 0.6;
+            double inverseEarly = 0.0; // 1 / VAF; 0 without the Early effect
 
             void derive() noexcept
             {
@@ -850,12 +856,23 @@ namespace coolsynth::synth::v3::wdf
                 const double gF = dev.saturation * ef * dev.inverseThermal, gR = dev.saturation * er * dev.inverseThermal;
                 // Base current iF / bF + iR / bR, collector current iF - iR (1 + 1 / bR).
                 i[s0] = sign * (iF * dev.inverseBetaF + iR * dev.inverseBetaR);
-                i[s1] = sign * (iF - iR * dev.reverseFactor);
-                // d/dvbe and d/dvce, with dvbc/dvbe = 1 and dvbc/dvce = -1.
                 g[s0][s0] = gF * dev.inverseBetaF + gR * dev.inverseBetaR;
                 g[s0][s1] = -gR * dev.inverseBetaR;
-                g[s1][s0] = gF - gR * dev.reverseFactor;
-                g[s1][s1] = gR * dev.reverseFactor;
+                if (dev.inverseEarly == 0.0)
+                {
+                    i[s1] = sign * (iF - iR * dev.reverseFactor);
+                    // d/dvbe and d/dvce, with dvbc/dvbe = 1 and dvbc/dvce = -1.
+                    g[s1][s0] = gF - gR * dev.reverseFactor;
+                    g[s1][s1] = gR * dev.reverseFactor;
+                }
+                else
+                {
+                    // With the Early effect: (iF - iR) (1 - vbc / VAF) - iR / bR.
+                    const double k = 1.0 - vbc * dev.inverseEarly, transport = iF - iR;
+                    i[s1] = sign * (transport * k - iR * dev.inverseBetaR);
+                    g[s1][s0] = (gF - gR) * k - transport * dev.inverseEarly - gR * dev.inverseBetaR;
+                    g[s1][s1] = gR * k + transport * dev.inverseEarly + gR * dev.inverseBetaR;
+                }
             }
         }
 
