@@ -39,6 +39,7 @@ def main():
     parser.add_argument("--leave", nargs="*", default=[], help="parts not drawn, besides the op-amps' insides")
     parser.add_argument("--tend", type=float, default=0.3)
     parser.add_argument("--early", type=float, default=0.008, help="seconds kept at every sample, from the start")
+    parser.add_argument("--step", type=float, default=STEP, help="the recording's time step, seconds")
     args = parser.parse_args()
 
     settings = dict(s.split("=", 1) for s in args.set)
@@ -54,7 +55,7 @@ def main():
             for key, value in settings.items():
                 line = re.sub(r"\b{}=\S+".format(re.escape(key)), "{}={}".format(key, value), line)
         elif line.startswith(".tran"):
-            line = ".tran {:.9g} {} 0 {:.9g}".format(STEP, args.tend, STEP / 4)
+            line = ".tran {:.9g} {} 0 {:.9g}".format(args.step, args.tend, args.step / 4)
         elif line.strip() == ".end":
             continue
         if fields and re.match(r"^[RCDQ]\w*$", fields[0]):
@@ -97,8 +98,8 @@ def main():
         sys.exit("expected {} columns, ngspice wrote {}".format(len(vectors) + 1, len(rows[0])))
 
     # Every sample of the start (the trigger and the attack), then one every 0.52 ms (the ring and the tail).
-    early = int(round(args.early / STEP))
-    stride = max(1, int(round(0.00052 / STEP)))
+    early = int(round(args.early / args.step))
+    stride = max(1, int(round(0.00052 / args.step)))
     picked = list(range(0, min(early + 1, len(rows)))) + list(range(early + stride, len(rows), stride))
     times = [round(rows[i][0] * 1000.0, 4) for i in picked]
 
