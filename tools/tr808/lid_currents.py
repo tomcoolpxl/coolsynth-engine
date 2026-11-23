@@ -40,30 +40,56 @@ def main():
     parser.add_argument("--tend", type=float, default=0.3)
     parser.add_argument("--early", type=float, default=0.008, help="seconds kept at every sample, from the start")
     parser.add_argument("--step", type=float, default=STEP, help="the recording's time step, seconds")
+    parser.add_argument("--only", nargs="*", default=[], help="record only these parts (one voice of the metal board)")
+    parser.add_argument("--hit", nargs="*", default=[], help="metal.cir: instrument:seconds (cb, cy, oh, ch)")
+    parser.add_argument("--phases", default="0.1,0.37,0.62,0.05,0.81,0.44", help="metal.cir: the oscillators' phases")
     args = parser.parse_args()
 
     settings = dict(s.split("=", 1) for s in args.set)
     settings["tend"] = repr(args.tend)
     leave = {p.lower() for p in args.leave}
+    only = {p.lower() for p in args.only}
     with open(args.netlist, "r", encoding="ascii") as f:
         lines = f.read().splitlines()
 
-    parts, body = {}, []
+    parts, body, plain, inside = {}, [], {}, False
     for line in lines:
         fields = line.split()
         if line.startswith(".param"):
             for key, value in settings.items():
                 line = re.sub(r"\b{}=\S+".format(re.escape(key)), "{}={}".format(key, value), line)
+            if "{" not in line:
+                for pair in line[len(".param"):].split():
+                    if "=" in pair:
+                        plain[pair.split("=", 1)[0]] = pair.split("=", 1)[1]
         elif line.startswith(".tran"):
             line = ".tran {:.9g} {} 0 {:.9g}".format(args.step, args.tend, args.step / 4)
         elif line.strip() == ".end":
             continue
-        if fields and re.match(r"^[RCDQ]\w*$", fields[0]):
+        elif line.lower().startswith(".subckt"):
+            inside = True
+        elif line.lower().startswith(".ends"):
+            inside = False
+        if fields and not inside and re.match(r"^[RCDQ]\w*$", fields[0]):
             name = fields[0].lower()
-            if name not in leave and not SOLVER_AIDS.match(name):
+            if name not in leave and not SOLVER_AIDS.match(name) and (not only or name in only):
                 count = 3 if name[0] == "q" else 2
                 parts[name] = [n.lower() for n in fields[1:1 + count]]
         body.append(line)
+    # The metal board's sources, written where its markers stand as render.py writes them.
+    if "* @TRIGGERS@" in body or "* @OSCILLATORS@" in body:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import render
+        if "* @TRIGGERS@" in body:
+            hits = [(h.split(":")[0], float(h.split(":")[1])) for h in args.hit]
+            at = body.index("* @TRIGGERS@")
+            body[at:at + 1] = render.trigger_lines(hits, render.spice_value(plain["tedge"]), render.spice_value(plain["width"]))
+        if "* @OSCILLATORS@" in body:
+            at = body.index("* @OSCILLATORS@")
+            body[at:at + 1] = render.oscillator_lines([float(p) for p in args.phases.split(",")], render.spice_value(plain["f1"]),
+                                                      render.spice_value(plain["f2"]), render.spice_value(plain["cs"]), args.tend)
+    if only - set(parts):
+        sys.exit("not in the netlist: " + ", ".join(sorted(only - set(parts))))
     missing = [k for k in settings if k != "tend" and not any(l.startswith(".param") and re.search(r"\b{}=".format(re.escape(k)), l) for l in body)]
     if missing:
         sys.exit("no such parameter: " + ", ".join(missing))
