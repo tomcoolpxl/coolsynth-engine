@@ -28,7 +28,7 @@ _NGSPICE_PLACES = [os.environ.get("COOLSYNTH_NGSPICE", "")] + [
 NGSPICE = next((p for p in _NGSPICE_PLACES if p and os.path.isfile(p)), _NGSPICE_PLACES[1])
 STEP = 20.0e-6
 # The op-amps' behavioural insides and the clamps on them: never drawn.
-SOLVER_AIDS = re.compile(r"^[rc]i[a-z]?\d*$|^dc[pn]\w*$")
+SOLVER_AIDS = re.compile(r"^[rc]i(\d+[a-z]?|[a-z]\d*)$|^dc[pn]\w*$")
 
 
 def main():
