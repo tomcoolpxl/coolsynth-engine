@@ -37,8 +37,9 @@ ctest --test-dir coolsynth-engine/build -C Debug --output-on-failure
 
 ## Where things are
 
-- `src/synth/v3`: the engine, its generators, processors and effects; `src/synth`: the arpeggiator and the global
-  effects; `src/diagnostics`: the flight recorder and the audio-thread allocation alarm.
+- `src/synth/v3`: the engine, its generators, processors and effects; `src/synth`: the arpeggiator, the global
+  effects and the step sequencer of CoolSynth 808 (`StepSequencer`); `src/diagnostics`: the flight recorder and the
+  audio-thread allocation alarm.
 - `tools/tr808`, `tools/kick808`, `tools/kick909`: the ngspice netlists the circuit models are checked against, and
   their render scripts; `tests/data`: the renders the tests compare with.
 - The design and research notes the code cites (`docs/design/DESIGN_V3.md`, `docs/research/...`) stay in

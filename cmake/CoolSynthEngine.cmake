@@ -36,6 +36,7 @@ target_sources(coolsynth_engine
         "${COOLSYNTH_ENGINE_ROOT}/src/synth/GlobalFxRack.cpp"
         "${COOLSYNTH_ENGINE_ROOT}/src/synth/Phaser.cpp"
         "${COOLSYNTH_ENGINE_ROOT}/src/synth/Compressor.cpp"
+        "${COOLSYNTH_ENGINE_ROOT}/src/synth/StepSequencer.cpp"
         "${COOLSYNTH_ENGINE_ROOT}/src/diagnostics/FlightRecorder.cpp")
 
 target_include_directories(coolsynth_engine INTERFACE "${COOLSYNTH_ENGINE_ROOT}/src")
@@ -80,7 +81,8 @@ if(BUILD_TESTING AND COOLSYNTH_ENGINE_TESTS)
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tr808SnareClapTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tr808Tests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tr909Tests.cpp"
-            "${COOLSYNTH_ENGINE_ROOT}/tests/V3VoiceTests.cpp")
+            "${COOLSYNTH_ENGINE_ROOT}/tests/V3VoiceTests.cpp"
+            "${COOLSYNTH_ENGINE_ROOT}/tests/StepSequencerTests.cpp")
     target_include_directories(CoolSynthEngineTests PRIVATE "${COOLSYNTH_ENGINE_ROOT}/tests")
     target_link_libraries(CoolSynthEngineTests
         PRIVATE
