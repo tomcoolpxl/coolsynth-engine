@@ -90,7 +90,8 @@ namespace coolsynth::synth
         /** The patterns to play in a row (indices into the bank). While stopped it takes effect at once, from bar 0;
             while playing at the end of the pattern that plays. */
         void setChain(const int* patterns, int count) noexcept;
-        /** Plays the fill pattern once, in the bar after the one that plays. */
+        /** Plays the fill pattern once, in the bar after the one that plays (while it plays, or is waiting to, a
+            second ask changes nothing; asked while stopped, nothing). */
         void requestFill() noexcept { fillAsked = true; }
 
         /** Notes for one block: the transport's beat position at the block's start, its tempo, whether it plays.
@@ -128,7 +129,9 @@ namespace coolsynth::synth
         [[nodiscard]] int barsPerPattern() const noexcept { return settings.variation == SequencerVariation::ab ? 2 : 1; }
         [[nodiscard]] Segment segmentAt(std::int64_t bar) const noexcept;
         void advanceTo(std::int64_t bar) noexcept;
-        void addPending(double beat, int note) noexcept;
+        void switchChainAt(std::int64_t bar) noexcept;
+        /** A time as a hit's place: the sixteenth plus how far into it, whatever the swing. */
+        [[nodiscard]] double hitPlaceAt(double beat) const noexcept;
         [[nodiscard]] const SequencerPattern& patternFor(const Segment& s) const noexcept;
 
         SequencerBank bankData {};
@@ -149,6 +152,11 @@ namespace coolsynth::synth
         bool wasPlaying = false;
         double lastBeatEnd = 0.0;
         std::int64_t lastBar = 0;
+        // Every hit up to this place has had its turn (played, or not by chance or a mute): a hit is never played
+        // twice nor skipped when the swing or the tempo moves it across a block's edge. Not valid after a start or
+        // a jump, where what came before is not this run's.
+        double doneUpTo = 0.0;
+        bool doneValid = false;
 
         std::array<PendingOff, maxPending> pending {};
         int pendingCount = 0;

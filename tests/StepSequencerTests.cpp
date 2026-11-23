@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -329,6 +330,137 @@ public:
             rig->play(1.0, 512, true, &notes);
             const auto hits = samplesOf(ons(notes));
             expect(hits == std::vector<std::int64_t> { 0, 0 });
+        }
+
+        beginTest("swing_turned_while_playing_never_doubles_or_drops_a_step");
+        {
+            auto bank = std::make_unique<SequencerBank>();
+            lane(bank->pattern[0], 0, 42, { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 });
+            bank->pattern[0].lanes[0].a[5].hits = 3;
+            auto rig = std::make_unique<Rig>();
+            rig->sequencer.setBank(*bank);
+            std::vector<Note> notes;
+            const double blockBeats = 256.0 * kBpm / 60.0 / kRate;
+            for (int i = 0; i < static_cast<int>(8.0 / blockBeats); ++i)
+            {
+                SequencerSettings s;
+                s.swing = 0.5f + 0.025f * static_cast<float>((i * 7) % 11); // turned all the time, up and down
+                rig->sequencer.setSettings(s);
+                rig->play(blockBeats, 256, true, &notes);
+            }
+            const auto hits = samplesOf(ons(notes));
+            expectEquals(static_cast<int>(hits.size()), 32 + 2 * 2, "each sixteenth once, the two rolls of three");
+            std::int64_t closest = 1 << 30;
+            for (std::size_t i = 1; i < hits.size(); ++i)
+                closest = std::min(closest, hits[i] - hits[i - 1]);
+            expectGreaterThan(static_cast<int>(closest), 1000, "no hit twice");
+        }
+
+        beginTest("a_fill_asked_again_while_it_plays_plays_whole");
+        {
+            auto bank = std::make_unique<SequencerBank>();
+            lane(bank->pattern[0], 0, 36, { 0 });
+            lane(bank->fill, 0, 39, { 0, 8 });
+            auto rig = std::make_unique<Rig>();
+            rig->sequencer.setBank(*bank);
+            std::vector<Note> notes;
+            rig->play(1.0, 256, true, &notes);
+            rig->sequencer.requestFill();
+            rig->play(4.5, 256, true, &notes); // into the fill's bar
+            rig->sequencer.requestFill();
+            rig->play(6.5, 256, true, &notes);
+            const auto hits = ons(notes);
+            expectEquals(static_cast<int>(hits.size()), 4);
+            expect(hits[1].note == 39 && hits[2].note == 39 && hits[2].sample == 24 * kSixteenth, "the fill's second hit");
+            expect(hits[3].note == 36 && hits[3].sample == 32 * kSixteenth, "then the pattern again");
+        }
+
+        beginTest("a_fill_asked_while_stopped_plays_nothing");
+        {
+            auto bank = std::make_unique<SequencerBank>();
+            lane(bank->pattern[0], 0, 36, { 0 });
+            lane(bank->fill, 0, 39, { 0 });
+            auto rig = std::make_unique<Rig>();
+            rig->sequencer.setBank(*bank);
+            rig->sequencer.requestFill();
+            rig->play(0.1, 256, false);
+            rig->position = 0;
+            for (const auto& n : ons(rig->run(8.0)))
+                expectEquals(n.note, 36);
+        }
+
+        beginTest("a_chain_chosen_in_the_last_sixteenth_takes_over_at_the_next_bar");
+        {
+            auto bank = std::make_unique<SequencerBank>();
+            lane(bank->pattern[0], 0, 36, { 0 });
+            lane(bank->pattern[1], 0, 38, { 0 });
+            auto rig = std::make_unique<Rig>();
+            rig->sequencer.setBank(*bank);
+            std::vector<Note> notes;
+            rig->play(3.8, 256, true, &notes); // the look ahead has reached the next bar
+            const int next[] { 1 };
+            rig->sequencer.setChain(next, 1);
+            rig->play(4.2, 256, true, &notes);
+            const auto hits = ons(notes);
+            expectEquals(static_cast<int>(hits.size()), 2);
+            expect(hits[1].note == 38 && hits[1].sample == 16 * kSixteenth);
+        }
+
+        beginTest("a_loop_back_to_before_a_switch_plays_the_chain_chosen");
+        {
+            auto bank = std::make_unique<SequencerBank>();
+            lane(bank->pattern[0], 0, 36, { 0 });
+            lane(bank->pattern[1], 0, 38, { 0 });
+            auto rig = std::make_unique<Rig>();
+            rig->sequencer.setBank(*bank);
+            std::vector<Note> notes;
+            rig->play(2.0, 512, true, &notes);
+            const int next[] { 1 };
+            rig->sequencer.setChain(next, 1);
+            rig->play(6.0, 512, true, &notes);
+            rig->position = 0; // the clock's master loops back
+            rig->play(2.0, 512, true, &notes);
+            const auto hits = ons(notes);
+            expectEquals(static_cast<int>(hits.size()), 3);
+            expect(hits[2].note == 38 && hits[2].sample == 0);
+        }
+
+        beginTest("a_crowded_block_leaves_no_note_hanging");
+        {
+            auto bank = std::make_unique<SequencerBank>();
+            for (int l = 0; l < SequencerPattern::maxLanes; ++l)
+            {
+                lane(bank->pattern[0], l, 36 + l, { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 });
+                for (auto& step : bank->pattern[0].lanes[static_cast<std::size_t>(l)].a)
+                    step.hits = 3;
+            }
+            auto rig = std::make_unique<Rig>();
+            rig->sequencer.setBank(*bank);
+            std::vector<Note> notes;
+            rig->play(4.0, 96000, true, &notes); // 768 hits in one block
+            rig->play(0.1, 256, false, &notes);
+            rig->play(0.1, 256, false, &notes);
+            std::array<int, 128> open {};
+            for (const auto& n : notes)
+                open[static_cast<std::size_t>(n.note)] += n.on ? 1 : -1;
+            for (int note = 0; note < 128; ++note)
+                expectEquals(open[static_cast<std::size_t>(note)], 0, "note " + juce::String(note));
+            expectGreaterThan(static_cast<int>(ons(notes).size()), 100);
+        }
+
+        beginTest("a_position_or_tempo_no_transport_gives_plays_nothing");
+        {
+            auto bank = std::make_unique<SequencerBank>();
+            lane(bank->pattern[0], 0, 36, { 0, 4, 8, 12 });
+            StepSequencer sequencer;
+            sequencer.setBank(*bank);
+            std::array<EngineMidiEvent, 64> events {};
+            expectEquals(sequencer.process(std::nan(""), kBpm, true, 512, kRate, events.data(), 64), 0);
+            expectEquals(sequencer.process(0.0, std::numeric_limits<double>::infinity(), true, 512, kRate, events.data(), 64), 0);
+            expectEquals(sequencer.process(1.0e300, kBpm, true, 512, kRate, events.data(), 64), 0);
+            // A tempo past any drum machine's is held to 1000 BPM: a few steps, not millions.
+            const int count = sequencer.process(0.0, 1.0e9, true, 512, kRate, events.data(), 64);
+            expect(count > 0 && count <= 64);
         }
 
         beginTest("the_same_notes_whatever_the_block_size");

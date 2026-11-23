@@ -42,9 +42,9 @@ namespace coolsynth::synth
     void StepSequencer::setSettings(const SequencerSettings& s) noexcept
     {
         settings = s;
-        settings.swing = std::clamp(s.swing, 0.5f, 0.75f);
-        settings.velocity = std::clamp(s.velocity, 0.0f, 1.0f);
-        settings.accentVelocity = std::clamp(s.accentVelocity, 0.0f, 1.0f);
+        settings.swing = std::isfinite(s.swing) ? std::clamp(s.swing, 0.5f, 0.75f) : 0.5f;
+        settings.velocity = std::isfinite(s.velocity) ? std::clamp(s.velocity, 0.0f, 1.0f) : 1.0f / 127.0f;
+        settings.accentVelocity = std::isfinite(s.accentVelocity) ? std::clamp(s.accentVelocity, 0.0f, 1.0f) : 1.0f;
     }
 
     void StepSequencer::setChain(const int* patterns, int count) noexcept
@@ -79,7 +79,18 @@ namespace coolsynth::synth
         fillAsked = false;
         fillBar = -1;
         wasPlaying = false;
+        doneValid = false;
         pendingCount = 0;
+    }
+
+    double StepSequencer::hitPlaceAt(double beat) const noexcept
+    {
+        // A swung sixteenth starts at or after its straight place and before the next one's.
+        auto k = static_cast<std::int64_t>(std::floor(beat / beatsPerStep));
+        if (beat < swungBeat(k))
+            --k;
+        const double start = swungBeat(k);
+        return static_cast<double>(k) + (beat - start) / (swungBeat(k + 1) - start);
     }
 
     double StepSequencer::swungBeat(std::int64_t sixteenth) const noexcept
@@ -129,6 +140,17 @@ namespace coolsynth::synth
         return s.pattern < 0 ? bankData.fill : bankData.pattern[static_cast<std::size_t>(s.pattern)];
     }
 
+    void StepSequencer::switchChainAt(std::int64_t bar) noexcept
+    {
+        previousChain = chain;
+        previousChainLength = chainLength;
+        previousChainStartBar = chainStartBar;
+        chain = nextChain;
+        chainLength = nextChainLength;
+        chainStartBar = bar;
+        nextChainLength = 0;
+    }
+
     void StepSequencer::advanceTo(std::int64_t bar) noexcept
     {
         while (lastBar < bar)
@@ -136,15 +158,7 @@ namespace coolsynth::synth
             ++lastBar;
             // A chain set while playing takes over at the end of the pattern that plays.
             if (nextChainLength > 0 && floorMod(lastBar - chainStartBar, barsPerPattern()) == 0)
-            {
-                previousChain = chain;
-                previousChainLength = chainLength;
-                previousChainStartBar = chainStartBar;
-                chain = nextChain;
-                chainLength = nextChainLength;
-                chainStartBar = lastBar;
-                nextChainLength = 0;
-            }
+                switchChainAt(lastBar);
         }
     }
 
@@ -163,43 +177,47 @@ namespace coolsynth::synth
         return { segment.pattern, segment.variationB, nearest - segment.runBar * stepsPerBar };
     }
 
-    void StepSequencer::addPending(double beat, int note) noexcept
-    {
-        if (pendingCount < maxPending)
-            pending[static_cast<std::size_t>(pendingCount++)] = { beat, note };
-    }
-
     int StepSequencer::process(double beat0, double bpm, bool playing, int blockSamples, double sampleRate,
                                EngineMidiEvent* out, int maxEvents) noexcept
     {
-        if (out == nullptr || maxEvents <= 0 || blockSamples <= 0 || sampleRate <= 0.0 || bpm <= 0.0)
+        // A position or tempo no transport gives (not a number, or past any song's length) plays nothing; the tempo is
+        // held to what a drum machine plays, so a host's bad value never runs the step loop away (review of D266).
+        if (out == nullptr || maxEvents <= 0 || blockSamples <= 0 || ! (sampleRate > 0.0) || ! (bpm > 0.0)
+            || ! std::isfinite(beat0) || ! std::isfinite(bpm) || std::abs(beat0) > 1.0e12)
             return 0;
+        bpm = std::clamp(bpm, 1.0, 1000.0);
 
         int count = 0;
         const auto emit = [&](EngineMidiEventType type, int offset, int note, float value)
         {
             if (count >= maxEvents)
-                return;
+                return false;
             EngineMidiEvent e;
             e.type = type;
             e.sampleOffset = offset;
             e.noteNumber = static_cast<std::uint8_t>(note);
             e.value = value;
             out[count++] = e;
+            return true;
         };
+        // The note-offs at offset 0, as far as there is room; any left wait for the next block.
         const auto flushPending = [&]
         {
+            int kept = 0;
             for (int i = 0; i < pendingCount; ++i)
-                emit(EngineMidiEventType::noteOff, 0, pending[static_cast<std::size_t>(i)].note, 0.0f);
-            pendingCount = 0;
+                if (const auto& p = pending[static_cast<std::size_t>(i)]; ! emit(EngineMidiEventType::noteOff, 0, p.note, 0.0f))
+                    pending[static_cast<std::size_t>(kept++)] = { -1.0e300, p.note };
+            pendingCount = kept;
         };
 
         if (! playing)
         {
+            if (wasPlaying || pendingCount > 0)
+                flushPending();
+            fillAsked = false; // asked while stopped: nothing (review of D266)
+            doneValid = false;
             if (wasPlaying)
             {
-                flushPending();
-                fillAsked = false;
                 fillBar = -1;
                 // Stopped, the next start begins at bar 0 with the chain last chosen.
                 if (nextChainLength > 0)
@@ -221,17 +239,35 @@ namespace coolsynth::synth
         if (! wasPlaying || std::abs(beat0 - lastBeatEnd) > jumpTolerance)
         {
             if (wasPlaying)
+            {
                 flushPending(); // a jump: the notes that rang belong to the old place
+                // ...and so does the chain that played before the last switch: every bar now plays the chain
+                // chosen, in its own place (a loop back to before a switch, review of D266).
+                previousChainLength = 0;
+            }
             lastBar = barOf(beat0);
             fillBar = -1;
+            doneValid = false;
         }
         wasPlaying = true;
         lastBeatEnd = beat1;
 
+        const auto barNow = barOf(beat0);
         if (fillAsked)
         {
-            fillBar = barOf(beat0) + 1;
+            // Asked again while the fill plays or waits: the one asked for stands (review of D266).
+            if (fillBar < barNow)
+                fillBar = barNow + 1;
             fillAsked = false;
+        }
+        // A chain set just after the last look ahead crossed the end of the pattern that plays: it takes over there,
+        // not a whole pattern later (review of D266).
+        if (nextChainLength > 0)
+        {
+            const int per = barsPerPattern();
+            const auto boundary = barNow + per - floorMod(barNow - chainStartBar, per);
+            if (boundary <= lastBar)
+                switchChainAt(boundary);
         }
 
         // A note sounds at the first sample at or after its time. Which block it falls in is decided by that whole
@@ -241,6 +277,9 @@ namespace coolsynth::synth
         {
             return static_cast<std::int64_t>(std::ceil((beat - beat0) / beatsPerSample - sampleTolerance));
         };
+
+        // The place of this block's last sample: the hits up to it play in this block.
+        const double doneNow = hitPlaceAt(beat0 + (static_cast<double>(blockSamples) - 1.0 + sampleTolerance) * beatsPerSample);
 
         // Every sixteenth whose hits can fall in this block: a swung or rolled one may start before it.
         const auto kFirst = static_cast<std::int64_t>(std::floor(beat0 / beatsPerStep)) - 1;
@@ -283,24 +322,39 @@ namespace coolsynth::synth
                 for (int h = 0; h < hits; ++h)
                 {
                     const double at = start + spacing * h;
-                    const auto offset = sampleOf(at);
-                    if (offset < 0 || offset >= blockSamples)
+                    // Each hit has its turn once, in the block whose last sample's place it reaches. Its place (the
+                    // sixteenth and how far into it) stays when the swing or the tempo moves its time: one that had
+                    // its turn is not played again, and one a move put behind this block's start, which never had
+                    // it, plays at once (review of D266). After a start or a jump, what lies before the block is not
+                    // this run's.
+                    const double place = static_cast<double>(k) + static_cast<double>(h) / hits;
+                    if (place > doneNow || (doneValid && place <= doneUpTo))
                         continue;
-                    emit(EngineMidiEventType::noteOn, static_cast<int>(offset), lane.note, velocity);
-                    addPending(at + spacing * 0.5, lane.note); // a short gate: the 808's drums play their tails out
+                    auto offset = sampleOf(at);
+                    if (offset < 0 && ! doneValid)
+                        continue;
+                    offset = std::clamp<std::int64_t>(offset, 0, blockSamples - 1);
+                    // With nowhere to keep its note-off (hundreds of hits in one block), a hit is let go rather than
+                    // left sounding.
+                    if (pendingCount >= maxPending || ! emit(EngineMidiEventType::noteOn, static_cast<int>(offset), lane.note, velocity))
+                        continue;
+                    // A short gate: the 808's drums play their tails out.
+                    pending[static_cast<std::size_t>(pendingCount++)] = { at + spacing * 0.5, lane.note };
                 }
             }
         }
+        // Every hit up to the last sample of this block has had its turn (never back: a swing turned up moves the
+        // places behind a time).
+        doneUpTo = doneValid ? std::max(doneUpTo, doneNow) : doneNow;
+        doneValid = true;
 
-        // The note-offs due in this block.
+        // The note-offs due in this block (one past its time, or kept from a full block, at once).
         for (int i = 0; i < pendingCount;)
         {
             auto& p = pending[static_cast<std::size_t>(i)];
-            if (const auto offset = sampleOf(p.beat); offset < blockSamples)
-            {
-                emit(EngineMidiEventType::noteOff, static_cast<int>(std::max<std::int64_t>(0, offset)), p.note, 0.0f);
+            const auto offset = p.beat <= beat0 ? std::int64_t { 0 } : sampleOf(p.beat);
+            if (offset < blockSamples && emit(EngineMidiEventType::noteOff, static_cast<int>(std::max<std::int64_t>(0, offset)), p.note, 0.0f))
                 p = pending[static_cast<std::size_t>(--pendingCount)];
-            }
             else
                 ++i;
         }
