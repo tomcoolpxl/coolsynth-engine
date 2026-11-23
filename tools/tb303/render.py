@@ -21,7 +21,8 @@ _NGSPICE_PLACES = [os.environ.get("COOLSYNTH_NGSPICE", "")] + [
     for base in (ROOT, os.path.join(ROOT, os.pardir, os.pardir))]
 NGSPICE = next((p for p in _NGSPICE_PLACES if p and os.path.isfile(p)), _NGSPICE_PLACES[1])
 
-NODES = {"vco.cir": ["nsaw", "nsq", "nc33", "ncv", "nb", "nbase", "nem", "ne8"]}
+NODES = {"vco.cir": ["nsaw", "nsq", "nc33", "ncv", "nb", "nbase", "nem", "ne8"],
+         "vcf.cir": ["ntp6", "nvcf", "nin", "nb10", "nb11", "nvq9", "n13"]}
 
 
 def main():

@@ -1,0 +1,158 @@
+* Roland TB-303 VCF, from the service notes (First Edition, 1982, p. 5, and p. 8's Fig. 2; D275): the diode ladder,
+* its drive and read-out, the resonance's feedback, the exponential converter and the knobs' network. The reference
+* for CoolSynth 303's filter.
+*
+* Rails as ideal sources: 12 V, 5.333 V; the filter's own rail through R95 (100 ohm) and C28 (47 uF).
+* Transistors: the 2SC945(P) and 2SA733(P) as vco.cir has them (Fairchild's 2N3904 and 2N3906, IS from the parts'
+* typical VBE: Q11's current against Q10's sets the cutoff, so their ratio matters); the duals Q12 and Q21
+* (2SC1583) and Q22 (2SC2291) as matched NPNs of hFE 500 (no published models). Q13 to Q17 and Q23 are 2SC945s
+* wired as diodes.
+*
+* The ladder: Q12's collectors pull its two sides down through four rungs of diodes (Q13, Q14, Q16 left; Q15, Q17,
+* Q23 right) from Q22's emitters; C18 (0.018 uF) across the bottom rung, C19, C24, C26 (0.033 uF) above. Q21, a
+* differential pair on a 0.52 mA tail (Q20), reads the top through C25 and C27 (0.1 uF); Q19 buffers it to C14.
+* R110 and R111 are 22k: the service notes print 2.2k, a misprint (the x0xb0x's schematic, Open Music Labs' redraw,
+* and Eddy Bergman's build have 22k); with 2.2k the resonance's loop gains about 1.3 and the filter never rings.
+* The input: the waveform through R62 (220k) and C17 into Q12's left base; the feedback: the RESONANCE pot's first
+* gang (VR4, 50k B) from C14's side, C15, Q18 and C23, R97 into Q12's right base.
+*
+* The current: Q11's collector (through R69). Q9 (2SA733) holds the converter's common node (VQ9) near 3.3 V; Q10
+* (2SA733), a follower, sets Q11's base above its own (p. 8, Fig. 2). CUTOFF FREQ (VR3, 50k A) from 12 V to R47
+* feeds Q10's emitter through R73 and TM3 (470k): the knob scales the current, Q10's base sets it exponentially.
+* Q10's base: R71 (2.2k) to VQ9, R63 (220k) from ENV MOD's wiper (VR5, 50k A, from the envelope at its pin 3 to R61
+* and VQ9 at its pin 1), R72 (100k) from the RESONANCE pot's second gang, which lies between R46 (from D24, the
+* ACCENT knob's wiper) and C13 (1 uF).
+*
+* The audio-taper pots (A) as 15 % at half turn (R = (e^(3.47 x) - 1) / (e^3.47 - 1) of the whole from pin 1).
+* TP6 is Q19's emitter (5.7 V at rest, as page 5's sketch draws it between 5.2 and 5.8 V); C14's output (nvcf) is
+* loaded by VR4's first gang and the VCA's input (taken as 220k and 0.01 uF to 5.333 V, IC15's bias, until vca.cir).
+*
+* Parameters: cutoff, res, envmod (each the knob's turn, 0..1), env (volts at ENV MOD's top; the envelope at rest
+* is near 0 V), acc (volts at D24's anode: the ACCENT knob's wiper), tm3 (0..1 of TM3's resistance), freq (the input
+* saw's frequency, Hz; 0 for none), sq (1: the input is a square from 5.333 to 8.8 V instead), tend. tm3 as calibrate.py sets it by
+* page 7: a 2.000 ms ring at TP6.
+.param cutoff=0.5 res=1 envmod=0 env=0 acc=0 tm3=0.1727 freq=65.406 sq=0 tend=0.2
+.param ka=3.47
+.param tcut={(exp(ka*cutoff)-1)/(exp(ka)-1)} tenv={(exp(ka*envmod)-1)/(exp(ka)-1)}
+.param rcut1={max(50k*tcut, 1)} rcut3={max(50k*(1-tcut), 1)}
+.param renv1={max(50k*tenv, 1)} renv3={max(50k*(1-tenv), 1)}
+.param rres1={max(50k*res, 1)} rres3={max(50k*(1-res), 1)}
+.param rtm3={max(470k*tm3, 1)}
+
+.model QEM NPN(IS=39f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2
++ ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p ITF=.4
++ VTF=4 XTF=2 RB=10)
+.model QPM PNP(IS=39f XTI=3 EG=1.11 VAF=18.7 BF=300 NE=1.5 ISE=0 IKF=80m XTB=1.5 BR=4.977 NC=2 ISC=0 IKR=0
++ RC=2.5 CJC=9.728p MJC=.5776 VJC=.75 FC=.5 CJE=8.063p MJE=.3677 VJE=.75 TR=33.42n TF=179.3p ITF=.4 VTF=4 XTF=6
++ RB=10)
+.model QDUAL NPN(IS=10f BF=500 BR=4 VAF=100 CJE=5p CJC=2.5p TF=400p)
+.model DEM D(IS=2.52n N=1.752 RS=0.568 CJO=2p)
+
+VCC vcc 0 12
+VR vr 0 5.333
+R95 vcc vf 100
+C28 vf 0 47u
+
+* The input: the VCO's saw (5.6 to 11.1 V, falling, as vco.cir's) or its square, at its mean for the operating point.
+BIN nin 0 V = {freq} <= 0 ? 8.35 : (time < 1u ? 8.35 : ({sq} > 0.5 ? (time*{freq} - floor(time*{freq}) < 0.5 ? 8.8 : 5.333) : 11.1 - 5.5*(time*{freq} - floor(time*{freq}))))
+R62 nin n17 220k
+C17 n17 nb12l 1u
+
+* Q12's bases: R70 and R98 (2.2k) to C16, held at 5.333 V by R68 (2.2k).
+R68 vr n16 2.2k
+C16 n16 0 10u
+R70 nb12l n16 2.2k
+R98 nb12r n16 2.2k
+
+* The ladder.
+Q12L nl1 nb12l ne12 QDUAL
+Q12R nr1 nb12r ne12 QDUAL
+Q13 nl2 nl2 nl1 QEM
+Q14 nl3 nl3 nl2 QEM
+Q16 nl4 nl4 nl3 QEM
+Q15 nr2 nr2 nr1 QEM
+Q17 nr3 nr3 nr2 QEM
+Q23 nr4 nr4 nr3 QEM
+C18 nl1 nr1 0.018u
+C19 nl2 nr2 0.033u
+C24 nl3 nr3 0.033u
+C26 nl4 nr4 0.033u
+Q22L vf nb22 nl4 QDUAL
+Q22R vf nb22 nr4 QDUAL
+R115 vf nb22 10k
+C30 nb22 0 10u
+
+* The read-out: Q21 through C27 (right side's top) and C25 (left side's top), biased from 5.333 V through R116 and
+* C29, R113 and R114 (100k); its tail Q20 (R116, R112, R109 divide 5.333 V in three; R108 2.2k); R111 and R110 (22k)
+* its loads;
+* Q19, a follower over R96 (10k), into C14.
+R116 vr nbias 10k
+C29 nbias 0 1u
+C27 nr4 nb21l 0.1u
+C25 nl4 nb21r 0.1u
+R113 nb21l nbias 100k
+R114 nb21r nbias 100k
+Q21L nc21l nb21l ne21 QDUAL
+Q21R nc21r nb21r ne21 QDUAL
+R111 vf nc21l 22k
+R110 vf nc21r 22k
+R112 nbias nb20 10k
+R109 nb20 0 10k
+Q20 ne21 nb20 ne20 QEM
+R108 ne20 0 2.2k
+Q19 vf nc21r ntp6 QEM
+R96 ntp6 0 10k
+C14 ntp6 nvcf 1u
+
+* C14's loads: RESONANCE's first gang (pin 3 at TP6, pin 1 to ground), and the VCA's input until vca.cir.
+RRES3 nvcf nresw {rres3}
+RRES1 nresw 0 {rres1}
+R121 nvcf n21 220k
+C21 n21 vr 0.01u
+
+* The feedback: the wiper through C15 and R67 (2.2k) into Q18's base, held by R99 (100k) at C22's 5.333 V (R66);
+* Q18's emitter over R94 (10k) through C23 and R97 (10k) into Q12's right base.
+C15 nresw n15 1u
+R67 n15 nb18 2.2k
+R66 vr n22 100k
+C22 n22 0 1u
+R99 n22 nb18 100k
+Q18 vcc nb18 ne18 QEM
+R94 ne18 0 10k
+C23 ne18 n23 1u
+R97 n23 nb12r 10k
+
+* The current: Q12's emitters through R69 to Q11; Q9's follower at VQ9 (R65, R64 halve 5.333 V).
+R69 ne12 nc11 2.2k
+Q11 nc11 nb11 nvq9 QEM
+R65 vr nb9 10k
+R64 nb9 0 10k
+Q9 0 nb9 nvq9 QPM
+Q10 0 nb10 nb11 QPM
+RCUT3 vcc ncutw {rcut3}
+RCUT1 ncutw ncut1 {rcut1}
+R47 ncut1 nvq9 10k
+R73 ncutw ntm3 100k
+RTM3 ntm3 nb11 {rtm3}
+R71 nb10 nvq9 2.2k
+
+* ENV MOD: the envelope at pin 3, R61 (10k) to VQ9 at pin 1, the wiper through R63 (220k) into Q10's base.
+VENV nenv 0 {env}
+RENV3 nenv nenvw {renv3}
+RENV1 nenvw n61 {renv1}
+R61 n61 nvq9 10k
+R63 nenvw nb10 220k
+
+* The accent's sweep: D24 from the ACCENT wiper, R46 (47k), RESONANCE's second gang (pin 1 at R46, pin 3 at C13,
+* its wiper turning with the first gang) and C13; the wiper through R72 (100k) into Q10's base.
+VACC nacc 0 {acc}
+D24 nacc nd24 DEM
+R46 nd24 nres1b 47k
+RRESB1 nres1b nresbw {rres1}
+RRESB3 nresbw n13 {rres3}
+C13 n13 0 1u
+R72 nresbw nb10 100k
+
+.options method=trap reltol=1e-5 abstol=1e-12 vntol=1e-7
+.tran 0.5u {tend} 0 0.5u
+.end

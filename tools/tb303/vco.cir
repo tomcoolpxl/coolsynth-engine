@@ -17,17 +17,18 @@
 * tm5 (WIDTH trimmer TM5, 4.7k, 0..1 of its resistance), tune (the TUNING knob VR2, 50k B, 0..1 from ground to
 * 5.333 V; its top end read as 5.333 V), tend.
 * tm4 and tm5 as calibrate.py sets them by page 7's procedure: A at 110.0 Hz, low C to high C 2:1, to high C
-* transposed up 4.002:1.
-.param cv=2.75 cv2=2.75 tcv=1 slide=0 tm4=0.5604 tm5=0.7379 tune=0.5 tend=0.05
+* transposed up 4.002:1 (with the models as fitted below).
+.param cv=2.75 cv2=2.75 tcv=1 slide=0 tm4=0.5719 tm5=0.7386 tune=0.5 tend=0.05
 .param rtm4a={max(47k*tm4, 1)} rtm4b={max(47k*(1-tm4), 1)} rtm5={max(4.7k*tm5, 1)}
 .param rv2a={max(50k*(1-tune), 1)} rv2b={max(50k*tune, 1)}
 
 * The 2SC945 and 2SA733 (no published models) as Fairchild's 2N3904 and 2N3906 from their datasheets, with their
-* storage times and low-current gain: the reset (Q24, Q25, Q27, a thyristor) lets go only through them.
-.model QEM NPN(IS=6.734f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2
+* storage times and low-current gain (the reset, Q24, Q25 and Q27, a thyristor, lets go only through them), their IS
+* set to both parts' typical VBE of 0.62 V at 1 mA (39 fA), the 2SA733(P)'s gain to its rank's middle (300).
+.model QEM NPN(IS=39f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2
 + ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p ITF=.4
 + VTF=4 XTF=2 RB=10)
-.model QPM PNP(IS=1.41f XTI=3 EG=1.11 VAF=18.7 BF=180.7 NE=1.5 ISE=0 IKF=80m XTB=1.5 BR=4.977 NC=2 ISC=0 IKR=0
+.model QPM PNP(IS=39f XTI=3 EG=1.11 VAF=18.7 BF=300 NE=1.5 ISE=0 IKF=80m XTB=1.5 BR=4.977 NC=2 ISC=0 IKR=0
 + RC=2.5 CJC=9.728p MJC=.5776 VJC=.75 FC=.5 CJE=8.063p MJE=.3677 VJE=.75 TR=33.42n TF=179.3p ITF=.4 VTF=4 XTF=6
 + RB=10)
 .model Q1583 NPN(IS=10f BF=500 BR=4 CJE=5p CJC=2.5p)
