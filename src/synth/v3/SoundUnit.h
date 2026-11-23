@@ -68,6 +68,21 @@ namespace coolsynth::synth::v3
         float milliseconds = 0.0f;
     };
 
+    /**
+        What an engine holds (D270). CoolSynth needs all of it; a program that plays one layer with no effects and
+        never changes its sound, as CoolSynth 808 does, can leave the rest out and take a tenth of the memory (about
+        60 MB at 48 kHz instead of 640). What is left out is never played: its settings are ignored.
+    */
+    struct EngineShape
+    {
+        bool earlierSounds = true; // the sounds still ringing after a sound change (D158); without, the one unit plays on
+        bool layerB = true;        // the second part
+        bool effects = true;       // each part's insert slots and the master slots F1..F6
+
+        /** One unit, layer A, no effects. */
+        [[nodiscard]] static constexpr EngineShape singleLayer() noexcept { return { false, false, false }; }
+    };
+
     class SoundUnit final
     {
     public:
@@ -76,7 +91,7 @@ namespace coolsynth::synth::v3
         static constexpr int guaranteedVoices = sharedVoices / partCount;
         static constexpr float silentLevelDb = -60.0f; // a part level at or below this is off
 
-        SoundUnit();
+        explicit SoundUnit(EngineShape shape = {});
 
         /** Message thread. Every buffer for blocks up to maxBlockSize; `seed` sets the voices' randomness apart. */
         void prepare(double sampleRate, int maxBlockSize, std::uint32_t seed);
@@ -97,22 +112,25 @@ namespace coolsynth::synth::v3
                     float fadeFrom, float fadeTo, StageTiming& slowest) noexcept;
 
         /** A voice is still playing. */
-        [[nodiscard]] bool isSounding() const noexcept { return parts[0]->isSounding() || parts[1]->isSounding(); }
+        [[nodiscard]] bool isSounding() const noexcept { return parts[0]->isSounding() || (parts[1] != nullptr && parts[1]->isSounding()); }
         /** The largest sample of the last block, after the master gain and before the fade. */
         [[nodiscard]] float lastPeak() const noexcept { return peak; }
         [[nodiscard]] int latencySamples() const noexcept { return parts[0]->latencySamples(); }
         [[nodiscard]] int activeVoiceCount() const noexcept
         {
-            return parts[0]->activeVoiceCountForTesting() + parts[1]->activeVoiceCountForTesting();
+            return parts[0]->activeVoiceCountForTesting() + (parts[1] != nullptr ? parts[1]->activeVoiceCountForTesting() : 0);
         }
         /** The voices the playing layers may use, after the cap (D222), as of the last block. */
         [[nodiscard]] int voiceLimit() const noexcept { return limitsNow[0] + limitsNow[1]; }
         [[nodiscard]] int voiceLimitForTesting(int part) const noexcept { return limitsNow[static_cast<std::size_t>(std::clamp(part, 0, partCount - 1))]; }
         [[nodiscard]] std::uint32_t consumeLearnedChord(int partIndex) noexcept
         {
-            return parts[static_cast<std::size_t>(std::clamp(partIndex, 0, partCount - 1))]->consumeLearnedChord();
+            auto& part = parts[static_cast<std::size_t>(std::clamp(partIndex, 0, partCount - 1))];
+            return part != nullptr ? part->consumeLearnedChord() : 0u;
         }
+        /** Layer B exists only in a shape that has it. */
         [[nodiscard]] Part& part(int index) noexcept { return *parts[static_cast<std::size_t>(index)]; }
+        [[nodiscard]] const EngineShape& shape() const noexcept { return unitShape; }
         [[nodiscard]] const InsertSlot& insert(int partIndex, int slot) const noexcept
         {
             return inserts[static_cast<std::size_t>(partIndex)][static_cast<std::size_t>(slot)];
@@ -149,6 +167,7 @@ namespace coolsynth::synth::v3
         };
 
         [[nodiscard]] static MixGains gainsFor(const PartMix& mix) noexcept;
+        void clearEffects() noexcept; // every insert and master slot silent, in a shape that has them
         void routeEvents(std::span<const EngineMidiEvent> events, const EngineSettings& settings,
                          const std::array<bool, partCount>& active) noexcept;
         void pushEvent(int partIndex, const EngineMidiEvent& event) noexcept;
@@ -158,6 +177,8 @@ namespace coolsynth::synth::v3
         [[nodiscard]] static float velocityShare(int layer, int velocity, int split, int fade) noexcept;
     private:
 
+        EngineShape unitShape;
+        int partsHeld = partCount; // 1 without layer B: parts[1] is then null
         std::array<std::unique_ptr<Part>, partCount> parts; // large: each a pool of voices with their slot arenas
         std::array<PartSettings, partCount> resolved {};   // the patch as this block plays it: voices, arp, tuning
         std::array<std::array<std::int8_t, 128>, partCount> sentNote {}; // per played key: the note the part was sent, or -1

@@ -95,10 +95,11 @@ namespace coolsynth::synth::v3
         };
     }
 
-    SoundUnit::SoundUnit()
+    SoundUnit::SoundUnit(EngineShape shape)
+        : unitShape(shape), partsHeld(shape.layerB ? partCount : 1)
     {
-        for (auto& part : parts)
-            part = std::make_unique<Part>();
+        for (int p = 0; p < partsHeld; ++p)
+            parts[static_cast<std::size_t>(p)] = std::make_unique<Part>();
         for (auto& sent : sentNote)
             sent.fill(-1);
     }
@@ -108,17 +109,21 @@ namespace coolsynth::synth::v3
         const int block = std::max(1, maxBlockSize);
         hostRate = std::max(1000.0, sampleRate);
         parts[0]->prepare(sampleRate, block, seed);
-        parts[1]->prepare(sampleRate, block, seed ^ 0xB0000u);
+        if (parts[1] != nullptr)
+            parts[1]->prepare(sampleRate, block, seed ^ 0xB0000u);
         // A key struck again under a new transpose is a note-off and a note-on; a mode change adds one event.
         for (auto& events : partEvents)
             events.assign(static_cast<std::size_t>(2 * coolsynth::synth::maxEngineEventsPerBlock + 2), {});
         // Each effect slot its own random numbers (D221), from the sound's seed and the slot's place (D162).
         std::uint32_t place = 0;
-        for (auto& slots : inserts)
-            for (auto& slot : slots)
-                slot.prepare(sampleRate, block, seed * 0x9E3779B1u + 0x51A70000u + ++place);
-        for (auto& slot : *masterSlots)
-            slot.prepare(sampleRate, block, seed * 0x9E3779B1u + 0x4A570000u + ++place);
+        if (unitShape.effects)
+        {
+            for (auto& slots : inserts)
+                for (auto& slot : slots)
+                    slot.prepare(sampleRate, block, seed * 0x9E3779B1u + 0x51A70000u + ++place);
+            for (auto& slot : *masterSlots)
+                slot.prepare(sampleRate, block, seed * 0x9E3779B1u + 0x4A570000u + ++place);
+        }
         work.setSize(2, block, false, true, true);
         for (auto& buffer : partBuffers)
             buffer.setSize(2, block, false, true, true);
@@ -137,17 +142,24 @@ namespace coolsynth::synth::v3
         freeBeats = 0.0;
     }
 
-    void SoundUnit::panic() noexcept
+    void SoundUnit::clearEffects() noexcept
     {
-        for (auto& part : parts)
-            part->reset();
-        for (auto& sent : sentNote)
-            sent.fill(-1);
+        if (! unitShape.effects)
+            return;
         for (auto& slots : inserts)
             for (auto& slot : slots)
                 slot.clear();
         for (auto& slot : *masterSlots)
             slot.clear();
+    }
+
+    void SoundUnit::panic() noexcept
+    {
+        for (int p = 0; p < partsHeld; ++p)
+            parts[static_cast<std::size_t>(p)]->reset();
+        for (auto& sent : sentNote)
+            sent.fill(-1);
+        clearEffects();
         partEventCount.fill(0);
         wasActive = { true, false };
         mixPrimed = false;
@@ -159,13 +171,16 @@ namespace coolsynth::synth::v3
 
     void SoundUnit::reseed() noexcept
     {
-        for (auto& part : parts)
-            part->reseed();
-        for (auto& slots : inserts)
-            for (auto& slot : slots)
+        for (int p = 0; p < partsHeld; ++p)
+            parts[static_cast<std::size_t>(p)]->reseed();
+        if (unitShape.effects)
+        {
+            for (auto& slots : inserts)
+                for (auto& slot : slots)
+                    slot.reseed();
+            for (auto& slot : *masterSlots)
                 slot.reseed();
-        for (auto& slot : *masterSlots)
-            slot.reseed();
+        }
         freeBeats = 0.0;
     }
 
@@ -173,7 +188,7 @@ namespace coolsynth::synth::v3
     {
         int bestPart = -1, bestVoice = -1;
         float quietest = std::numeric_limits<float>::max();
-        for (int p = 0; p < partCount; ++p)
+        for (int p = 0; p < partsHeld; ++p)
         {
             float level = 0.0f;
             if (const int v = parts[static_cast<std::size_t>(p)]->quietestReleased(level); v >= 0 && level < quietest)
@@ -327,7 +342,9 @@ namespace coolsynth::synth::v3
                            float fadeFrom, float fadeTo, StageTiming& slowest) noexcept
     {
         // A layer with every slot Off is left out (D190): it costs nothing, and the other has every key.
-        const std::array<bool, partCount> active { ! layerEmpty(settings.parts[0]), ! layerEmpty(settings.parts[1]) };
+        // A shape without layer B never plays it (D270).
+        const std::array<bool, partCount> active { ! layerEmpty(settings.parts[0]),
+                                                   parts[1] != nullptr && ! layerEmpty(settings.parts[1]) };
         routeEvents(events, settings, active);
 
         std::array<int, partCount> voices { voicesWanted(settings.parts[0]), voicesWanted(settings.parts[1]) };
@@ -340,15 +357,16 @@ namespace coolsynth::synth::v3
             limitsNow[p] = active[p] ? voices[p] : 0;
 
         // Where each part's part-wide sources stood before this block: the effect routes ramp from there (D179).
+        const auto held = static_cast<std::size_t>(partsHeld);
         std::array<ModSources, partCount> sourcesBefore {};
-        for (std::size_t p = 0; p < parts.size(); ++p)
+        for (std::size_t p = 0; p < held; ++p)
             sourcesBefore[p] = parts[p]->effectSources();
 
         // The voices first: both parts, each into its own buffer.
         std::array<bool, partCount> rendered {};
         bool soundOff = false;
         bool phraseStart = false;
-        for (std::size_t p = 0; p < parts.size(); ++p)
+        for (std::size_t p = 0; p < held; ++p)
         {
             auto& part = *parts[p];
             // A part the mode leaves out costs nothing once it has rung out.
@@ -377,13 +395,7 @@ namespace coolsynth::synth::v3
         }
 
         if (soundOff)
-        {
-            for (auto& slots : inserts)
-                for (auto& slot : slots)
-                    slot.clear();
-            for (auto& slot : *masterSlots)
-                slot.clear();
-        }
+            clearEffects();
 
         // Tempo and beat: the host's while it plays, otherwise the arp's tempo and a count that
         // starts again with the first note after silence. Synced delays and pumps follow them.
@@ -413,7 +425,7 @@ namespace coolsynth::synth::v3
         float* dryLeft = dryBus.getWritePointer(0);
         float* dryRight = dryBus.getWritePointer(1);
         bool dryUsed = false;
-        for (std::size_t p = 0; p < parts.size(); ++p)
+        for (std::size_t p = 0; p < held; ++p)
         {
             const auto target = gainsFor(settings.mix[p]);
             const auto from = mixPrimed ? lastGains[p] : target;
@@ -426,7 +438,7 @@ namespace coolsynth::synth::v3
             const auto& routes = settings.parts[p].effectRoutes;
             const auto& after = parts[p]->effectSources();
             const bool routesMove = effectRoutesMove(routes, sourcesBefore[p], after);
-            for (std::size_t slot = 0; slot < inserts[p].size(); ++slot)
+            for (std::size_t slot = 0; unitShape.effects && slot < inserts[p].size(); ++slot)
             {
                 if (! routesMove)
                     inserts[p][slot].process(partAudio, withSpace(settings.inserts[p][slot], settings.space), beat);
@@ -482,9 +494,9 @@ namespace coolsynth::synth::v3
 
         // The master slots, F1 to F6 in turn; both parts' routes may move them.
         bool masterRoutesMove = false;
-        for (std::size_t p = 0; p < parts.size(); ++p)
+        for (std::size_t p = 0; p < held; ++p)
             masterRoutesMove = masterRoutesMove || effectRoutesMove(settings.parts[p].effectRoutes, sourcesBefore[p], parts[p]->effectSources());
-        for (std::size_t slot = 0; slot < masterSlots->size(); ++slot)
+        for (std::size_t slot = 0; unitShape.effects && slot < masterSlots->size(); ++slot)
         {
             const StageClock masterClock { slowest, 10 + static_cast<int>(slot) };
             if (! masterRoutesMove)
@@ -493,7 +505,7 @@ namespace coolsynth::synth::v3
                 runInSteps(stereo, n, beat, [&](juce::AudioBuffer<float>& piece, float t, const InsertContext& at)
                 {
                     auto moved = settings.master[slot];
-                    for (std::size_t p = 0; p < parts.size(); ++p)
+                    for (std::size_t p = 0; p < held; ++p)
                         applyEffectRoutes(moved, true, static_cast<int>(slot), settings.parts[p].effectRoutes,
                                           between(sourcesBefore[p], parts[p]->effectSources(), t));
                     (*masterSlots)[slot].process(piece, withSpace(moved, settings.space), at);

@@ -48,7 +48,10 @@ namespace coolsynth::synth::v3
 
         using StageTiming = v3::StageTiming;
 
-        EngineV3();
+        /** The whole engine by default; a smaller shape leaves out what a program never plays (D270). */
+        explicit EngineV3(EngineShape shape = {});
+
+        [[nodiscard]] const EngineShape& shape() const noexcept { return engineShape; }
 
         void prepare(double sampleRate, int maxBlockSize, int outputChannels);
         void releaseResources() noexcept {}
@@ -78,8 +81,8 @@ namespace coolsynth::synth::v3
         [[nodiscard]] int activeVoiceCount() const noexcept
         {
             int voices = 0;
-            for (const auto& unit : units)
-                voices += unit->activeVoiceCount();
+            for (int u = 0; u < unitsHeld; ++u)
+                voices += units[static_cast<std::size_t>(u)]->activeVoiceCount();
             return voices;
         }
         /** Samples since the last call that went into the output's soft clipper (above its knee), then zero. */
@@ -97,7 +100,7 @@ namespace coolsynth::synth::v3
         [[nodiscard]] Part& partForTesting(int index = 0) noexcept { return units[static_cast<std::size_t>(current)]->part(index); }
         [[nodiscard]] const InsertSlot& insertForTesting(int part, int slot) const noexcept { return units[static_cast<std::size_t>(current)]->insert(part, slot); }
         [[nodiscard]] const InsertSlot& masterSlotForTesting(int slot) const noexcept { return units[static_cast<std::size_t>(current)]->masterSlot(slot); }
-        /** Any unit, 0 to unitCount - 1. */
+        /** Any unit the shape holds: 0 to unitCount - 1, or only 0 without earlier sounds. */
         [[nodiscard]] SoundUnit& unitForTesting(int index) noexcept { return *units[static_cast<std::size_t>(index)]; }
         [[nodiscard]] int currentUnitForTesting() const noexcept { return current; }
 
@@ -151,6 +154,8 @@ namespace coolsynth::synth::v3
         void endUnit(int unit) noexcept;
         [[nodiscard]] int oldestRinging() const noexcept;
 
+        EngineShape engineShape;
+        int unitsHeld = unitCount; // 1 without earlier sounds: the other units are then null and stay idle
         std::array<std::unique_ptr<SoundUnit>, unitCount> units;
         std::array<UnitState, unitCount> state {};
         std::array<std::vector<EngineMidiEvent>, unitCount> unitEvents;

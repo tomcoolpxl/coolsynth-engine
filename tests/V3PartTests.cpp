@@ -486,6 +486,58 @@ public:
             }
             expect(peak > 0.3f);
         }
+
+        // D270: a program that plays one layer with no effects (CoolSynth 808) holds one unit, one part, no slots.
+        beginTest("a_single_layer_engine_sounds_as_the_whole_one_and_ignores_what_it_leaves_out");
+        {
+            auto renderAll = [&](EngineV3& engine, const EngineSettings& s, std::vector<EngineMidiEvent> events, int blocks)
+            {
+                std::vector<float> out;
+                juce::AudioBuffer<float> buffer(2, kBlock);
+                for (int b = 0; b < blocks; ++b)
+                {
+                    buffer.clear();
+                    engine.render(buffer, b == 0 ? std::span<const EngineMidiEvent>(events) : std::span<const EngineMidiEvent>(), s);
+                    for (int ch = 0; ch < 2; ++ch)
+                        out.insert(out.end(), buffer.getReadPointer(ch), buffer.getReadPointer(ch) + kBlock);
+                }
+                return out;
+            };
+            auto whole = std::make_unique<EngineV3>();
+            auto lean = std::make_unique<EngineV3>(EngineShape::singleLayer());
+            whole->prepare(kRate, kBlock, 2);
+            lean->prepare(kRate, kBlock, 2);
+
+            EngineSettings layerA;
+            layerA.parts[0] = basicPart(Wave::saw);
+            layerA.masterGainLinear = 0.7f;
+            const std::vector<EngineMidiEvent> chord { on(48), on(55), on(64, 0.6f, 100) };
+            const auto a = renderAll(*whole, layerA, chord, 30);
+            const auto b = renderAll(*lean, layerA, chord, 30);
+            expect(a == b, "layer A alone: the same samples");
+            expect(peakAbs(a) > 0.1f);
+
+            // Layer B and the effects asked for are left out: the lean engine sounds as the whole one without them.
+            auto withRest = layerA;
+            withRest.parts[1] = basicPart(Wave::sine);
+            withRest.inserts[0][0].type = insertType::drive;
+            withRest.master[0].type = insertType::delay;
+            whole->restart();
+            lean->restart();
+            const auto c = renderAll(*whole, layerA, chord, 30);
+            const auto d = renderAll(*lean, withRest, chord, 30);
+            expect(c == d, "layer B and the effects ignored");
+
+            // A sound change while a note rings: the one unit plays on with the new settings.
+            lean->restart();
+            auto changed = layerA;
+            changed.parts[0].soundGeneration = layerA.parts[0].soundGeneration + 1;
+            (void) renderAll(*lean, layerA, { on(60) }, 4);
+            const auto after = renderAll(*lean, changed, {}, 4);
+            expectEquals(lean->earlierSoundsRinging(), 0);
+            expect(peakAbs(after) > 0.1f, "the note rings on");
+            expectEquals(lean->activeVoiceCount(), 1);
+        }
     }
 };
 

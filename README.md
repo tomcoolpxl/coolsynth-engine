@@ -21,6 +21,8 @@ target_link_libraries(MyApp PRIVATE coolsynth_engine)
 - `cmake/CoolSynthFlags.cmake` holds the settings every CoolSynth program shares: the C++ runtime, and a Debug
   build compiled optimised so it plays in real time.
 - `COOLSYNTH_ENGINE_TESTS` (on by default) builds the engine's own test program, `CoolSynthEngineTests`.
+- `EngineV3` holds the whole engine by default, about 640 MB at 48 kHz. A program that plays one layer with no
+  effects passes `EngineShape::singleLayer()` and holds about 35 MB (CoolSynth's D270).
 
 ## Building and testing it on its own
 

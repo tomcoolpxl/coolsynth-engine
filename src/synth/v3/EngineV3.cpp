@@ -63,10 +63,11 @@ namespace coolsynth::synth::v3
         return allThere;
     }
 
-    EngineV3::EngineV3()
+    EngineV3::EngineV3(EngineShape shape)
+        : engineShape(shape), unitsHeld(shape.earlierSounds ? unitCount : 1)
     {
-        for (auto& unit : units)
-            unit = std::make_unique<SoundUnit>();
+        for (int u = 0; u < unitsHeld; ++u)
+            units[static_cast<std::size_t>(u)] = std::make_unique<SoundUnit>(shape);
         keyOwner.fill(-1);
     }
 
@@ -76,14 +77,14 @@ namespace coolsynth::synth::v3
         hostRate = std::max(1000.0, sampleRate);
         // Every unit the seeds unit 0 always had (0x5EED and 0xB5EED), so rendered presets stay as they were: a sound's
         // random numbers are the sound's, whichever unit plays it (D222), as each unit reseeds when it takes a new one.
-        for (int u = 0; u < unitCount; ++u)
+        for (int u = 0; u < unitsHeld; ++u)
             units[static_cast<std::size_t>(u)]->prepare(sampleRate, block, 0x5EEDu);
         for (auto& events : unitEvents)
             events.assign(static_cast<std::size_t>(2 * coolsynth::synth::maxEngineEventsPerBlock + 16), {});
         pieceEvents.assign(static_cast<std::size_t>(coolsynth::synth::maxEngineEventsPerBlock), {});
         sum.setSize(2, block, false, true, true);
-        for (auto& out : unitOut)
-            out.setSize(2, block, false, true, true);
+        for (int u = 0; u < unitsHeld; ++u)
+            unitOut[static_cast<std::size_t>(u)].setSize(2, block, false, true, true);
         AudioWorkers::instance().prepare(); // the helpers exist before the first block (D164)
         // Every unit idle; none is reset, as each was just prepared (a reset would draw new random phases).
         for (auto& s : state)
@@ -105,7 +106,7 @@ namespace coolsynth::synth::v3
 
     void EngineV3::panic() noexcept
     {
-        for (int u = 0; u < unitCount; ++u)
+        for (int u = 0; u < unitsHeld; ++u)
             endUnit(u);
         state[static_cast<std::size_t>(current)].phase = Phase::playing;
         keyOwner.fill(-1);
@@ -120,15 +121,14 @@ namespace coolsynth::synth::v3
         state[static_cast<std::size_t>(current)].phase = Phase::idle;
         current = 0;
         state[0].phase = Phase::playing;
-        for (auto& unit : units)
-            unit->reseed();
+        reseed();
         generationPrimed = false;
     }
 
     void EngineV3::reseed() noexcept
     {
-        for (auto& unit : units)
-            unit->reseed();
+        for (int u = 0; u < unitsHeld; ++u)
+            units[static_cast<std::size_t>(u)]->reseed();
     }
 
     void EngineV3::endUnit(int u) noexcept
@@ -189,11 +189,13 @@ namespace coolsynth::synth::v3
         for (auto& part : compareScratch->parts)
             part.soundGeneration = lastSettings->parts[0].soundGeneration;
         auto& playing = state[static_cast<std::size_t>(current)];
-        if (std::memcmp(compareScratch.get(), lastSettings.get(), sizeof(EngineSettings)) == 0
+        if (! engineShape.earlierSounds
+            || std::memcmp(compareScratch.get(), lastSettings.get(), sizeof(EngineSettings)) == 0
             || (! units[static_cast<std::size_t>(current)]->isSounding() && playing.keysHeld == 0))
         {
-            // Nothing rings, or nothing changed: the same unit plays on. A new sound in silence starts from its seeds,
-            // as it would in another unit (D222); a sound that rings is never disturbed.
+            // Nothing rings, or nothing changed, or the shape keeps no earlier sounds (D270): the same unit plays on. A
+            // new sound in silence starts from its seeds, as it would in another unit (D222); a sound that rings is
+            // never disturbed.
             if (! units[static_cast<std::size_t>(current)]->isSounding() && playing.keysHeld == 0)
                 units[static_cast<std::size_t>(current)]->reseed();
             playing.generation = incoming;
