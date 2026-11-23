@@ -21,9 +21,10 @@
 
     Q11's collector feeds the loop's Q12 a sample late, as a current (its collector is a current source's: nothing
     the loop does reaches back); Q20's tail likewise, a fixed current. Both enter the loop as a source behind 1 GOhm,
-    its volts set each sample from the node's last voltage so the current is exact. Too slow so far (about 150 % of
-    a core at 192 kHz): the 1 GOhm sources make the solver's residual large for microvolts, so every sample pays for
-    a full 22 by 22 solve; the cost work is next (D279).
+    its volts set each sample from the node's last voltage so the current is exact. Every junction conducts all the
+    time, so every sample takes a Newton step: both circuits keep their Jacobian's factors and refactor only when
+    those stop bringing the step down (the chord method, D281), about one sample in a hundred; a sample then costs
+    some 2.2 us at 192 kHz (45 % of a core, optimised Debug), within some 3 ppm of the exact solve.
 
     Transistors: the 2SC945 and 2SA733 as vcf.cir's stand-ins (Fairchild's 2N3904 and 2N3906 with IS from the parts'
     typical VBE), here as Ebers-Moll with their forward Early voltages (VAF 74 V, 18.7 V); the duals (2SC1583, 2SC2291) as matched NPNs of hFE 500, VAF 100 V. The rungs' diode-wired
@@ -48,8 +49,22 @@ namespace coolsynth::synth::v3
         {
             converter.setNewtonLimit(40);
             loop.setNewtonLimit(40);
+            setJacobianReuse(true);
             buildConverter();
             buildLoop();
+        }
+
+        /** The chord method on both circuits (D281), on by default; off solves each sample exactly, for the tests. */
+        void setJacobianReuse(bool on) noexcept
+        {
+            converter.setJacobianReuse(on);
+            loop.setJacobianReuse(on);
+        }
+        /** The share of the loop's steps that factored afresh. */
+        [[nodiscard]] double freshShare() const noexcept
+        {
+            const long all = loop.chordStepCount() + loop.freshStepCount();
+            return all > 0 ? static_cast<double>(loop.freshStepCount()) / static_cast<double>(all) : 0.0;
         }
 
         void prepare(double rate) noexcept

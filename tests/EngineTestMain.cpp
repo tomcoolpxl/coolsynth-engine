@@ -8,6 +8,18 @@
 
 #include "TestSampleLibrary.h"
 
+#if JUCE_WINDOWS
+ #include <crtdbg.h>
+ #include <cstdlib>
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+#endif
+
 namespace
 {
     class StdoutLogger : public juce::Logger
@@ -15,10 +27,32 @@ namespace
     protected:
         void logMessage(const juce::String& message) override { std::cout << message.toRawUTF8() << std::endl; }
     };
+
+    /** No window on the desktop when a test goes wrong (the debug library's assertion, an index out of range,
+        abort, a crash): each prints to stderr and the program ends with a failure, so a run never waits on a click. */
+    void keepFailuresOffTheScreen()
+    {
+       #if JUCE_WINDOWS
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+        for (const int kind : { _CRT_WARN, _CRT_ERROR, _CRT_ASSERT })
+        {
+            _CrtSetReportMode(kind, _CRTDBG_MODE_FILE);
+            _CrtSetReportFile(kind, _CRTDBG_FILE_STDERR);
+        }
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+        _set_invalid_parameter_handler([](const wchar_t*, const wchar_t*, const wchar_t*, unsigned, uintptr_t)
+        {
+            std::fputs("\nINVALID PARAMETER (an index out of range?)\n", stderr);
+            std::fflush(stderr);
+            std::_Exit(3);
+        });
+       #endif
+    }
 }
 
 int main()
 {
+    keepFailuresOffTheScreen();
     StdoutLogger logger;
     juce::Logger::setCurrentLogger(&logger);
     // A crash prints where it happened (the thread's stack, with names when the .pdb is beside the runner).

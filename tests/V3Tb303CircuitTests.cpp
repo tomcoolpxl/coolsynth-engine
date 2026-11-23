@@ -145,7 +145,15 @@ public:
                                + " b11 " + juce::String(ref.columns.at("nb11")[0], 5));
                 }
                 const std::size_t n = ref.size();
+                const char* const nodes[] = { "ntp6", "nvcf", "nl4", "nr4", "nb10", "nb11", "n13" };
                 std::map<juce::String, std::vector<double>> model;
+                for (const auto* node : nodes)
+                    model[node].assign(n, 0.0);
+                // Written through plain pointers: a map's lookup each sample would cost more than the filter in the
+                // Debug build, and the timing below is the filter's.
+                double* out[7];
+                for (int k = 0; k < 7; ++k)
+                    out[k] = model[nodes[k]].data();
                 int worstNewton = 0;
                 long totalNewton = 0;
                 bool converged = true;
@@ -162,20 +170,47 @@ public:
                         state("  sample " + juce::String(static_cast<int>(i)));
                     if (debug && i == 6)
                         break;
-                    model["ntp6"].push_back(filter->tp6());
-                    model["nvcf"].push_back(filter->output());
-                    model["nl4"].push_back(filter->ladderTopLeft());
-                    model["nr4"].push_back(filter->ladderTopRight());
-                    model["nb10"].push_back(filter->q10Base());
-                    model["nb11"].push_back(filter->q11Base());
-                    model["n13"].push_back(filter->c13());
+                    out[0][i] = filter->tp6();
+                    out[1][i] = filter->output();
+                    out[2][i] = filter->ladderTopLeft();
+                    out[3][i] = filter->ladderTopRight();
+                    out[4][i] = filter->q10Base();
+                    out[5][i] = filter->q11Base();
+                    out[6][i] = filter->c13();
                     worstNewton = std::max(worstNewton, filter->newtonSteps());
                     totalNewton += filter->newtonSteps();
                     converged = converged && filter->lastSolveConverged();
                 }
                 const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+                const double freshShare = filter->freshShare();
+
+                // The same sound solved exactly, every sample factoring afresh: the chord method's own error (D281).
+                {
+                    auto exact = std::make_unique<Tb303Filter>();
+                    exact->setJacobianReuse(false);
+                    exact->prepare(ref.rate);
+                    exact->setKnobs(c.cutoff, c.resonance, c.envMod, 0.1642);
+                    exact->settle(8.35, c.envelope, c.accent);
+                    double e = 0.0;
+                    std::vector<double> exactTp6(n);
+                    for (std::size_t i = 0; i < n; ++i)
+                    {
+                        const double t = static_cast<double>(i) / ref.rate;
+                        const double phase = t * freq - std::floor(t * freq);
+                        const double in = t < 1.0e-6 ? 8.35 : 11.1 - 5.5 * phase;
+                        const bool after = t > c.step;
+                        exact->process(in, after ? c.envelope2 : c.envelope, after ? c.accent2 : c.accent);
+                        exactTp6[i] = exact->tp6();
+                        const double d = out[0][i] - exactTp6[i];
+                        e += d * d;
+                    }
+                    const double share = std::sqrt(e / static_cast<double>(n)) / std::max(1.0e-12, swing(exactTp6));
+                    logMessage(juce::String(c.file) + ": the chord method against the exact solve, TP6 " + juce::String(share * 1.0e6, 2)
+                               + " ppm of its swing; " + juce::String(freshShare * 100.0, 2) + " % of the steps factored afresh");
+                    expectLessThan(share, 1.0e-4, juce::String(c.file) + ": the chord method keeps to the exact solve");
+                }
                 juce::String line = juce::String(c.file) + ":";
-                for (const auto* node : { "ntp6", "nvcf", "nl4", "nr4", "nb10", "nb11", "n13" })
+                for (const auto* node : nodes)
                 {
                     const auto [err, offset] = swingError(model[node], ref.columns.at(node));
                     line << " " << node << " " << juce::String(err, 4) << " (" << juce::String(offset * 1e3, 2) << " mV)";

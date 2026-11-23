@@ -203,6 +203,7 @@ namespace coolsynth::synth::v3::wdf
             for (int m = 0; m < nonlinearCount; ++m)
                 voltage[static_cast<std::size_t>(m)] = 0.0;
             previousVoltage = earlierVoltage = voltage;
+            haveFactors = false;
         }
 
         /**
@@ -284,6 +285,7 @@ namespace coolsynth::synth::v3::wdf
                 previousVoltage[i] = shared ? other.previousVoltage[i] : 0.0;
                 earlierVoltage[i] = shared ? other.earlierVoltage[i] : 0.0;
             }
+            haveFactors = false;
         }
 
         /**
@@ -313,6 +315,7 @@ namespace coolsynth::synth::v3::wdf
                 earlierVoltage[i] = other.earlierVoltage[i];
             }
             newtonSteps = 0;
+            haveFactors = false;
         }
 
         void restore(const Snapshot& s) noexcept
@@ -329,6 +332,7 @@ namespace coolsynth::synth::v3::wdf
             current = s.current;
             newtonSteps = 0; // as a fresh circuit, so a restored one solves its next sample the same way
             solved = true;
+            haveFactors = false;
         }
 
         /** One sample. */
@@ -342,7 +346,24 @@ namespace coolsynth::synth::v3::wdf
         {
             residualTolerance = std::max(1.0e-12, volts);
             stepTolerance = 2.0e-5 * std::sqrt(residualTolerance / 1.0e-7);
+            chordTolerance = 0.1 * stepTolerance;
         }
+
+        /**
+            The chord method (D281), off by default: a fresh Jacobian factored only when the kept one stops bringing
+            the step down, so most samples cost two triangular solves instead of a factoring. For circuits whose
+            junctions all conduct all the time (the TB-303's filter), where every sample needs a Newton step. A chord
+            step ends the solve below a tenth of the Newton step tolerance (2 uV by default), its error the step times
+            how far the kept factors are from the present ones.
+        */
+        void setJacobianReuse(bool on) noexcept
+        {
+            reuseJacobian = on;
+            haveFactors = false;
+        }
+        /** Since the circuit was built: the steps that used kept factors and those that factored afresh. */
+        [[nodiscard]] long chordStepCount() const noexcept { return chordSteps; }
+        [[nodiscard]] long freshStepCount() const noexcept { return freshSteps; }
 
         [[nodiscard]] double probe(int index) const noexcept { return probes[static_cast<std::size_t>(index)]; }
         [[nodiscard]] double portVoltage(int port) const noexcept
@@ -464,6 +485,7 @@ namespace coolsynth::synth::v3::wdf
         {
             static thread_local Scratch scratchSpace;
             ++analysesOnThisThread;
+            haveFactors = false; // K changes
             const int unknowns = nodeCount() + inputCount + nullorCount;
             const int columns = portCount + inputCount;
             // Plain pointers, as a sample's loops (step): in the Debug build a checked index costs more than the
@@ -876,6 +898,80 @@ namespace coolsynth::synth::v3::wdf
             }
         }
 
+        /** The chord method's factoring: LU with partial pivoting, kept as the rows in pivot order, L's multipliers
+            below the diagonal (L unit lower), U on and above it. */
+        void factor(double (*jac)[maxDevicePorts]) noexcept
+        {
+            const int m = nonlinearCount;
+            double* row[maxDevicePorts];
+            int order[maxDevicePorts];
+            for (int r = 0; r < m; ++r)
+            {
+                row[r] = jac[r];
+                order[r] = r;
+            }
+            for (int col = 0; col < m; ++col)
+            {
+                int pivot = col;
+                for (int r = col + 1; r < m; ++r)
+                    if (std::abs(row[r][col]) > std::abs(row[pivot][col]))
+                        pivot = r;
+                std::swap(row[pivot], row[col]);
+                std::swap(order[pivot], order[col]);
+                const double d = row[col][col];
+                if (std::abs(d) < 1.0e-300)
+                {
+                    for (int r = col + 1; r < m; ++r)
+                        row[r][col] = 0.0; // as the plain elimination, which skips the column
+                    continue;
+                }
+                const double inverse = 1.0 / d;
+                const double* __restrict top = row[col];
+                for (int r = col + 1; r < m; ++r)
+                {
+                    double* __restrict below = row[r];
+                    const double multiplier = below[col] * inverse;
+                    below[col] = multiplier;
+                    for (int c = col + 1; c < m; ++c)
+                        below[c] -= multiplier * top[c];
+                }
+            }
+            for (int r = 0; r < m; ++r)
+            {
+                factorOrder[static_cast<std::size_t>(r)] = order[r];
+                const double* from = row[r];
+                double* to = factors[static_cast<std::size_t>(r)].data();
+                for (int c = 0; c < m; ++c)
+                    to[c] = from[c];
+            }
+            haveFactors = true;
+        }
+
+        /** delta = J^-1 residual with the kept factors. */
+        void solveWithFactors(const double* residual, double* delta) const noexcept
+        {
+            const int m = nonlinearCount;
+            const int* order = factorOrder.data();
+            double y[maxDevicePorts];
+            for (int r = 0; r < m; ++r)
+            {
+                const double* row = factors[static_cast<std::size_t>(r)].data();
+                double s = residual[order[r]];
+                for (int c = 0; c < r; ++c)
+                    s -= row[c] * y[c];
+                y[r] = s;
+            }
+            for (int r = m - 1; r >= 0; --r)
+            {
+                const double* row = factors[static_cast<std::size_t>(r)].data();
+                double s = y[r];
+                for (int c = r + 1; c < m; ++c)
+                    s -= row[c] * delta[c];
+                const double d = row[r];
+                delta[r] = std::abs(d) < 1.0e-300 ? 0.0 : s / d;
+            }
+        }
+
         /** SPICE's pnjlim: a junction's new voltage kept from leaping up the exponential. */
         static double limitJunction(double vNew, double vOld, const Device& dev) noexcept
         {
@@ -985,6 +1081,10 @@ namespace coolsynth::synth::v3::wdf
                 before[r] = last[r];
             }
 
+            // The chord method's count this sample, whether the next step must factor afresh, and the last step's size.
+            int chordThisSample = 0;
+            bool freshNext = false;
+            double lastLargest = 0.0;
             // Newton from the voltages as they are toward a set of the linear part's inputs: true once converged.
             auto iterate = [&](const double* target) -> bool
             {
@@ -1004,6 +1104,16 @@ namespace coolsynth::synth::v3::wdf
                     {
                         return true; // f is the current at these voltages
                     }
+                    // The chord method (setJacobianReuse): the kept factors, while they bring the step down.
+                    const bool chord = reuseJacobian && haveFactors && ! freshNext && chordThisSample < chordLimit;
+                    if (chord)
+                    {
+                        solveWithFactors(residual, delta);
+                        ++chordThisSample;
+                        ++chordSteps;
+                    }
+                    else
+                    {
                     // The Jacobian I - K G, G block diagonal by device: each column has a device's one or two terms.
                     for (int d = 0; d < deviceCount; ++d)
                     {
@@ -1025,6 +1135,15 @@ namespace coolsynth::synth::v3::wdf
                             jac[r][s1] = (r == s1 ? 1.0 : 0.0) - (k0 * g01 + k1 * g11);
                         }
                     }
+                    if (reuseJacobian)
+                    {
+                        factor(jac);
+                        solveWithFactors(residual, delta);
+                        ++freshSteps;
+                        freshNext = false;
+                    }
+                    else
+                    {
                     // delta = jac^-1 residual, by elimination with partial pivoting (rows swapped as pointers).
                     double* row[maxDevicePorts];
                     for (int r = 0; r < m; ++r)
@@ -1059,13 +1178,19 @@ namespace coolsynth::synth::v3::wdf
                         const double d = row[col][col];
                         delta[col] = std::abs(d) < 1.0e-300 ? 0.0 : s / d;
                     }
+                    }
+                    }
                     // A step this small leaves the answer within some 10 nV (Newton's error goes as the step squared
                     // over twice VT): take it, the currents carried along their slopes, without evaluating the junctions
-                    // again, as SPICE's step tolerance ends its iterations.
+                    // again, as SPICE's step tolerance ends its iterations. A chord step, its error the step times how
+                    // far the kept factors are from the present ones, ends the solve only below a tenth of that.
                     double largest = 0.0;
                     for (int r = 0; r < m; ++r)
                         largest = std::max(largest, std::abs(delta[r]));
-                    if (largest < stepTolerance)
+                    if (chord && chordThisSample > 1 && largest > 0.5 * lastLargest)
+                        freshNext = true; // the kept factors no longer halve the step
+                    lastLargest = largest;
+                    if (largest < (chord ? chordTolerance : stepTolerance))
                     {
                         for (int r = 0; r < m; ++r)
                             v[r] -= delta[r];
@@ -1180,7 +1305,13 @@ namespace coolsynth::synth::v3::wdf
 
         int portCount = 0, inputCount = 0, nullorCount = 0, gainCount = 0, deviceCount = 0, nonlinearCount = 0, probeCount = 0;
         int newtonSteps = 0, newtonLimit = maxNewtonSteps;
-        double residualTolerance = 1.0e-7, stepTolerance = 2.0e-5; // setNewtonTolerance
+        double residualTolerance = 1.0e-7, stepTolerance = 2.0e-5, chordTolerance = 2.0e-6; // setNewtonTolerance
+        // The chord method (setJacobianReuse): the kept factors, at most chordLimit of their steps in a sample.
+        static constexpr int chordLimit = 3;
+        bool reuseJacobian = false, haveFactors = false;
+        long chordSteps = 0, freshSteps = 0;
+        std::array<std::array<double, maxDevicePorts>, maxDevicePorts> factors {};
+        std::array<int, maxDevicePorts> factorOrder {};
         bool solved = true;
         bool wellPosed = true;
         double sampleRate = 96000.0;
