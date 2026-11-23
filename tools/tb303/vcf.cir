@@ -32,7 +32,9 @@
 * saw's frequency, Hz; 0 for none), sq (1: the input is a square from 5.333 to 8.8 V instead), tend. tm3 as calibrate.py sets it by
 * page 7: a 2.000 ms ring at TP6. Fitted to Din Sync's real unit by the whole voice (compare_dinsync.py, SET-A1
 * at cutoff 25 to 100 %): tm3 0.35, harmonics 2 to 8 within 0.7 dB on average at three positions, 2.1 dB at 75 %.
-.param cutoff=0.5 res=1 envmod=0 env=0 acc=0 tm3=0.1727 freq=65.406 sq=0 tend=0.2
+* The 12 V rail: IC16 makes it from the 5.333 V reference times 1 + R178 / R179 (2.2k / 1.8k), 11.85 V, not the 12 V
+* drawn (D275); with 5 % resistors a unit may sit anywhere from about 11.4 to 12.3 V. vcc sets it.
+.param cutoff=0.5 res=1 envmod=0 env=0 acc=0 tm3=0.1642 freq=65.406 sq=0 vcc=11.851 tend=0.2
 .param ka=3.47
 .param tcut={(exp(ka*cutoff)-1)/(exp(ka)-1)} tenv={(exp(ka*envmod)-1)/(exp(ka)-1)}
 .param rcut1={max(50k*tcut, 1)} rcut3={max(50k*(1-tcut), 1)}
@@ -49,7 +51,7 @@
 .model QDUAL NPN(IS=10f BF=500 BR=4 VAF=100 CJE=5p CJC=2.5p TF=400p)
 .model DEM D(IS=2.52n N=1.752 RS=0.568 CJO=2p)
 
-VCC vcc 0 12
+VCC vcc 0 {vcc}
 VR vr 0 5.333
 R95 vcc vf 100
 C28 vf 0 47u

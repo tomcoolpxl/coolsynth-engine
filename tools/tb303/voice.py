@@ -96,7 +96,7 @@ def main():
                 out.append(line)
                 block.append(current)
         names.update(block)
-    out += ["", "VCC vcc 0 12", "VR vr 0 5.333", ""]
+    out += ["", "VCC vcc 0 {vcc}", "VR vr 0 5.333", ""]
 
     out += [".subckt VCO vcc vr nsaw nsq"] + vco + [".ends", ""]
     out += [".subckt VCF vcc vr nin nenv nacc ntp6 nvcf nresw"] + vcf + [".ends", ""]

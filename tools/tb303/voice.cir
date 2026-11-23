@@ -8,10 +8,11 @@
 .param cv2=2.75
 .param tcv=1
 .param slide=0
-.param tm4=0.5719
-.param tm5=0.7386
+.param tm4=0.5687
+.param tm5=0.7389
 .param tune=0.5
 .param c11=1u
+.param vcc=11.851
 .param tend=0.05
 .param rtm4a={max(47k*tm4, 1)}
 .param rtm4b={max(47k*(1-tm4), 1)}
@@ -22,7 +23,7 @@
 .param res=1
 .param envmod=0
 .param acc=0
-.param tm3=0.1727
+.param tm3=0.1642
 .param ka=3.47
 .param tcut={(exp(ka*cutoff)-1)/(exp(ka)-1)}
 .param tenv={(exp(ka*envmod)-1)/(exp(ka)-1)}
@@ -57,7 +58,7 @@
 .model JFY NJF(VTO=-1.5 BETA=0.89m LAMBDA=2m CGS=8p CGD=3p)
 .model SWV SW(VT=6 VH=0.5 RON=200 ROFF=1G)
 
-VCC vcc 0 12
+VCC vcc 0 {vcc}
 VR vr 0 5.333
 
 .subckt VCO vcc vr nsaw nsq

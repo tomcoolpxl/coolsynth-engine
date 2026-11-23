@@ -6,7 +6,9 @@
 *
 * Parameters: as env.cir (decay, acc, accent, ton, toff, taoff), and amp, freq (the audio sine), res (RESONANCE's
 * turn, 0..1), tend.
-.param decay=0.5 acc=0 accent=0.5 ton=10m toff=72.5m taoff=135m amp=0.3 freq=440 res=0.5 tend=0.5
+* The 12 V rail: IC16 makes it from the 5.333 V reference times 1 + R178 / R179 (2.2k / 1.8k), 11.85 V, not the 12 V
+* drawn (D275); with 5 % resistors a unit may sit anywhere from about 11.4 to 12.3 V. vcc sets it.
+.param decay=0.5 acc=0 accent=0.5 ton=10m toff=72.5m taoff=135m amp=0.3 freq=440 res=0.5 vcc=11.851 tend=0.5
 .param ka=3.47
 .param tdec={(exp(ka*decay)-1)/(exp(ka)-1)} rdec={max(1Meg*tdec, 1)}
 .param racc1={max(50k*accent, 1)} racc3={max(50k*(1-accent), 1)}
@@ -21,7 +23,7 @@
 .model DEM D(IS=2.52n N=1.752 RS=0.568 CJO=2p)
 .model SWI SW(VT=6 VH=0.5 RON=200 ROFF=1G)
 
-VCC vcc 0 12
+VCC vcc 0 {vcc}
 VR vr 0 5.333
 
 * The gate, 0 or 5 V from the CPU.
@@ -97,7 +99,8 @@ R122 n22 nin3 100k
 
 * The control current into pin 1: Q31 (2SA733) from GATE through D35, R133 and R131 (220k); its base on C42 (1 uF),
 * which Q32 empties through R132 at each trigger (D36, R134, C41) and R123 (1.5 M) refills: the volume's own decay.
-* The accent's share through R120 and D27. (D34 and R137, from GATE's side to a line not yet traced, are left out.)
+* The accent's share through R120 and D27. (D34 and R137 feed the GATE OUT jack from here; with nothing plugged in
+* they carry nothing, so they are left out.)
 D35 ngate n35 DEM
 R133 n35 nx31 2.2k
 R131 nx31 ne31 220k

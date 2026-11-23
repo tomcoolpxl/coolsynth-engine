@@ -6,7 +6,8 @@ The VCF: TM3 for a ring of 2 ms at TP6 with the saw on the low C key, CUTOFF cen
 and ACCENT at nothing.
 
 Usage: python -I tools/tb303/calibrate.py [vco|vcf]
-Results (2026-11-23): tm4 0.5719, tm5 0.7386 (A 110.0 Hz, 4.002:1); tm3 0.1727 (a 2.000 ms ring). The netlists hold them.
+Results (2026-11-23, the rail at 11.85 V): tm4 0.5687, tm5 0.7389 (A 110.0 Hz, 4.002:1); tm3 0.1642 (a 2.000 ms ring).
+The netlists hold them.
 """
 import concurrent.futures
 import csv

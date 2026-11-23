@@ -18,8 +18,10 @@
 * 5.333 V; its top end read as 5.333 V), c11 (C11, 1 uF electrolytic as printed; fitted to Din Sync's real unit by
 * the whole voice, its square at low C: 0.82 uF, harmonics 2 to 10 within 0.4 dB), tend.
 * tm4 and tm5 as calibrate.py sets them by page 7's procedure: A at 110.0 Hz, low C to high C 2:1, to high C
-* transposed up 4.002:1 (with the models as fitted below).
-.param cv=2.75 cv2=2.75 tcv=1 slide=0 tm4=0.5719 tm5=0.7386 tune=0.5 c11=1u tend=0.05
+* transposed up 4.002:1 (with the models as fitted below, the rail at 11.85 V).
+* The 12 V rail: IC16 makes it from the 5.333 V reference times 1 + R178 / R179 (2.2k / 1.8k), 11.85 V, not the 12 V
+* drawn (D275); with 5 % resistors a unit may sit anywhere from about 11.4 to 12.3 V. vcc sets it.
+.param cv=2.75 cv2=2.75 tcv=1 slide=0 tm4=0.5687 tm5=0.7389 tune=0.5 c11=1u vcc=11.851 tend=0.05
 .param rtm4a={max(47k*tm4, 1)} rtm4b={max(47k*(1-tm4), 1)} rtm5={max(4.7k*tm5, 1)}
 .param rv2a={max(50k*(1-tune), 1)} rv2b={max(50k*tune, 1)}
 
@@ -38,7 +40,7 @@
 .model DCL D(IS=1e-12 N=1)
 .model SWI SW(VT=0.5 VH=0.1 RON=200 ROFF=1G)
 
-VCC vcc 0 12
+VCC vcc 0 {vcc}
 VR vr 0 5.333
 
 * The ladder's voltage behind its 100 kOhm.
