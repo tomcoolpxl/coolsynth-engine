@@ -1,0 +1,161 @@
+* Roland TB-303 VCA, from the service notes (First Edition, 1982, p. 5; D275), with the envelope generator it shares
+* its GATE, trigger and accent with (env.cir's circuit, repeated here so both run together): IC15 (BA662A) as its
+* transistors, Q31 and Q32 setting its control current from C42, the accent's share through D27. The reference for
+* CoolSynth 303's VCA. The audio inputs come from the filter's output (R121, C21) and the RESONANCE pot's wiper
+* (R122, C22), as the x0xb0x's schematic (Open Music Labs' redraw) draws them; page 5 leaves them unlabelled.
+*
+* Parameters: as env.cir (decay, acc, accent, ton, toff, taoff), and amp, freq (the audio sine), res (RESONANCE's
+* turn, 0..1), tend.
+.param decay=0.5 acc=0 accent=0.5 ton=10m toff=72.5m taoff=135m amp=0.3 freq=440 res=0.5 tend=0.5
+.param ka=3.47
+.param tdec={(exp(ka*decay)-1)/(exp(ka)-1)} rdec={max(1Meg*tdec, 1)}
+.param racc1={max(50k*accent, 1)} racc3={max(50k*(1-accent), 1)}
+
+.model QEM NPN(IS=39f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2
++ ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p ITF=.4
++ VTF=4 XTF=2 RB=10)
+.model QPM PNP(IS=39f XTI=3 EG=1.11 VAF=18.7 BF=300 NE=1.5 ISE=0 IKF=80m XTB=1.5 BR=4.977 NC=2 ISC=0 IKR=0
++ RC=2.5 CJC=9.728p MJC=.5776 VJC=.75 FC=.5 CJE=8.063p MJE=.3677 VJE=.75 TR=33.42n TF=179.3p ITF=.4 VTF=4 XTF=6
++ RB=10)
+.model JFY NJF(VTO=-1.5 BETA=0.89m LAMBDA=2m CGS=8p CGD=3p)
+.model DEM D(IS=2.52n N=1.752 RS=0.568 CJO=2p)
+.model SWI SW(VT=6 VH=0.5 RON=200 ROFF=1G)
+
+VCC vcc 0 12
+VR vr 0 5.333
+
+* The gate, 0 or 5 V from the CPU.
+VG ng 0 PWL(0 0 {ton} 0 {ton+1u} 5 {toff} 5 {toff+1u} 0)
+R146 ng nb37 22k
+R144 nb37 0 10k
+Q37 nc37 nb37 0 QEM
+
+* Q36: GATE.
+R147 vcc ne36 22
+R142 vcc nb36 10k
+C72 vcc nb36 10u
+R143 nb36 nc37 10k
+Q36 ngate nb36 ne36 QPM
+R145 ngate 0 10k
+
+* Q38: the one-shot into C62.
+R150 vcc ne38 22
+C55 ne38 0 47u
+R149 vcc nb38 10k
+R148 nb38 n54 10k
+C54 n54 nc37 0.047u
+Q38 nc38 nb38 ne38 QPM
+R151 nc38 0 22k
+D37 nc38 n152 DEM
+R152 n152 nc62 100
+C62 nc62 0 1u
+
+* The buffer: Q41 and Q40 over Q39 (gate and source to ground).
+Q41 vcc nc62 ne41 QEM
+Q40 vcc ne41 nenv QEM
+J39 nenv 0 0 JFY
+
+* The decay: R138 to the DECAY line, DECAY to the diode string; IC12B shorts DECAY on an accent.
+VACC nacc 0 PWL(0 0 {ton} 0 {ton+1u} {acc} {taoff} {acc} {taoff+1u} 0)
+R138 nc62 ndec 68k
+RDEC ndec nn4 {rdec}
+S12B ndec nn4 nacc 0 SWI
+D28 nn4 nn3 DEM
+D29 nn3 nn2 DEM
+R117 vr nn2 22k
+D26 nn2 0 DEM
+
+* IC12A: the envelope to the ACCENT knob on an accent; its wiper toward the VCA (R119, C36) and the filter (D24).
+S12A nenv nacc3 nacc 0 SWI
+RACC3 nacc3 naccw {racc3}
+RACC1 naccw 0 {racc1}
+R119 naccw n36 47k
+C36 n36 0 0.033u
+R120 n36 n27 22k
+
+* ENV MOD's load: 50k and R61 to the filter's VQ9.
+RLOAD nenv nvq9 60k
+VQ9 nvq9 0 3.31
+
+* ---- The VCA ----
+
+* The audio: the filter's output (C14's side) and the RESONANCE pot's wiper (res times it), here a sine of amp volts
+* at freq Hz (the filter's output swings about +-0.3 V at TP6).
+VAUD nvcf 0 SIN(0 {amp} {freq})
+BRES nresw 0 V = {res} * v(nvcf)
+
+* IC15's inputs: both at C37's 5.333 V (R126) through R125 and R124 (2.2k); the audio into pin 3 through R121 and C21
+* (from the filter) and R122 and C22 (from the RESONANCE wiper).
+R126 vr nm 2.2k
+C37 nm 0 10u
+R125 nm nin2 2.2k
+R124 nm nin3 2.2k
+C21 nvcf n21 0.01u
+R121 n21 nin3 220k
+C22 nresw n22 0.01u
+R122 n22 nin3 100k
+
+* The control current into pin 1: Q31 (2SA733) from GATE through D35, R133 and R131 (220k); its base on C42 (1 uF),
+* which Q32 empties through R132 at each trigger (D36, R134, C41) and R123 (1.5 M) refills: the volume's own decay.
+* The accent's share through R120 and D27. (D34 and R137, from GATE's side to a line not yet traced, are left out.)
+D35 ngate n35 DEM
+R133 n35 nx31 2.2k
+R131 nx31 ne31 220k
+Q31 niabc nb31 ne31 QPM
+R123 vcc nb31 1.5Meg
+C42 nb31 0 1u
+R132 nb31 nc32 100
+D36 nc38 n36d DEM
+R134 n36d nb32 22k
+C41 nb32 0 0.1u
+Q32 nc32 nb32 ne32 QEM
+R130 ne32 0 100
+D27V n27 niabc DEM
+
+* IC15, the BA662A: pin 9 and pin 4 to 12 V, pin 5 to ground.
+XIC15 niabc nin2 nin3 vcc 0 nota nota nvout vcc BA662
+
+* Its output's load: R128 (220k) and R127 (47k) side by side, R129 (22k) to C40's 5.333 V (R162 2.2k); the buffer
+* (pins 7, 8) out through C38 to the mixer (taken as 100k).
+R128 nota nn 220k
+R127 nota nn 47k
+R129 nn nq 22k
+R162 vr nq 2.2k
+C40 nq 0 10u
+C38 nvout nout 1u
+RMIX nout 0 100k
+
+* The BA662 as Open Music Labs reverse-engineered it (openmusiclabs.com/wiki/x0xb0x, its BA662 page): Q1A and Q1B
+* mirror pin 1's current (emitter resistors about 500 ohm, measured) to the pair Q2A (pin 2) and Q2B (pin 3); two PNP
+* Wilson mirrors (Q3A, Q3B, Q5B; Q4A, Q4B, Q5A) and an NPN one (Q6A, Q6B, Q7B) make pin 6 the difference of the
+* pair's currents; pin 7 to pin 8 a complementary follower (Q7A, Q10A, R21 11k), biased by Q9A mirroring Q9B's
+* current from pin 4 through R20 (50k). Transistors: generic integrated NPN (hFE 150) and lateral PNP (hFE 50).
+.subckt BA662 p1 p2 p3 p4 p5 p6 p7 p8 p9
+Q1A p1 p1 e1a NI
+R1A e1a p5 500
+Q1B t p1 e1b NI
+R1B e1b p5 500
+Q2A ca p2 t NI
+Q2B cb p3 t NI
+Q3A ca b3 p9 PL
+Q3B b3 b3 p9 PL
+Q5B x ca b3 PL
+Q4A cb b4 p9 PL
+Q4B b4 b4 p9 PL
+Q5A p6 cb b4 PL
+Q6A x b6 p5 NI
+Q6B b6 b6 p5 NI
+Q7B p6 x b6 NI
+R20 p4 b9 50k
+Q9B b9 b9 p5 NI
+Q9A e7 b9 p5 NI
+Q7A p9 p7 e7 NI
+Q10A p5 e7 p8 PL
+R21 p9 p8 11k
+.model NI NPN(IS=1f BF=150 VAF=100 CJE=1p CJC=0.5p TF=0.5n)
+.model PL PNP(IS=1f BF=50 VAF=50 CJE=1p CJC=2p TF=20n)
+.ends
+
+.options method=trap reltol=1e-5 abstol=1e-12 vntol=1e-7
+.tran 10u {tend} 0 10u
+.end
