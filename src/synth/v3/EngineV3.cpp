@@ -78,7 +78,7 @@ namespace coolsynth::synth::v3
         // Every unit the seeds unit 0 always had (0x5EED and 0xB5EED), so rendered presets stay as they were: a sound's
         // random numbers are the sound's, whichever unit plays it (D222), as each unit reseeds when it takes a new one.
         for (int u = 0; u < unitsHeld; ++u)
-            units[static_cast<std::size_t>(u)]->prepare(sampleRate, block, 0x5EEDu);
+            units[static_cast<std::size_t>(u)]->prepare(sampleRate, block, 0x5EEDu, oversampling);
         for (auto& events : unitEvents)
             events.assign(static_cast<std::size_t>(2 * coolsynth::synth::maxEngineEventsPerBlock + 16), {});
         pieceEvents.assign(static_cast<std::size_t>(coolsynth::synth::maxEngineEventsPerBlock), {});

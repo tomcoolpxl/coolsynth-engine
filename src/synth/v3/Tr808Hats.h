@@ -346,13 +346,16 @@ namespace coolsynth::synth::v3
         }
 
         /** Both VCAs, one sample, the high band at these volts (while the bank runs). */
-        void processVcas(double highBand) noexcept
+        void processVcas(double highBand, bool runOpen = true, bool runClosed = true) noexcept
         {
             openVca.setInput(openGate.band, highBand);
             closedVca.setInput(closedGate.band, highBand);
             setVcaSources();
-            openVca.process();
-            closedVca.process();
+            // The 808's Lighter accuracy (CoolSynth's D338): a hat's VCA only while that hat sounds (D255's other way).
+            if (runOpen)
+                openVca.process();
+            if (runClosed)
+                closedVca.process();
             openGateVolts = openVca.probe(openGate.gateProbe);
             closedGateVolts = closedVca.probe(closedGate.gateProbe);
             // For the tap (D317): the envelopes this sample ran (they run before the VCAs), for after it.
@@ -389,6 +392,19 @@ namespace coolsynth::synth::v3
             return hat == open ? openVca.portVoltage(openGate.coupling) : closedVca.portVoltage(closedGate.coupling);
         }
         [[nodiscard]] bool usingTriggerParts(int hat) const noexcept { return state[static_cast<std::size_t>(hat)].usingFull; }
+        /** Every circuit's Newton tolerance (D259's setting; the 808's Lighter accuracy, CoolSynth's D338). */
+        void setNewtonTolerance(double volts) noexcept
+        {
+            openFull.setNewtonTolerance(volts);
+            openTail.setNewtonTolerance(volts);
+            closedFull.setNewtonTolerance(volts);
+            closedTail.setNewtonTolerance(volts);
+            openVca.setNewtonTolerance(volts);
+            closedVca.setNewtonTolerance(volts);
+            openOutput.setNewtonTolerance(volts);
+            closedOutput.setNewtonTolerance(volts);
+        }
+
         /** A hat's VCA's last Newton steps, for the cost tests. */
         [[nodiscard]] int vcaNewtonSteps(int hat) const noexcept { return hat == open ? openVca.lastNewtonSteps() : closedVca.lastNewtonSteps(); }
         /** A hat's envelope's last Newton steps (the full circuit's while the trigger stands), for the cost tests. */

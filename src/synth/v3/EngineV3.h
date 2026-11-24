@@ -54,6 +54,9 @@ namespace coolsynth::synth::v3
         [[nodiscard]] const EngineShape& shape() const noexcept { return engineShape; }
 
         void prepare(double sampleRate, int maxBlockSize, int outputChannels);
+        /** False: the voices at the host's own rate, not near 96 kHz (Part::oversampleFor); from the next prepare. The
+            808's Lightest accuracy (CoolSynth's D338). True by default. Message thread. */
+        void setOversampling(bool on) noexcept { oversampling = on; }
         /** Where the 808's generators report their instruments' levels as they play, for a panel to show (CoolSynth's
             D313, CircuitWatch.h); null, the default, for none. Set it before playing; the watch outlives the engine's
             use of it. */
@@ -164,6 +167,7 @@ namespace coolsynth::synth::v3
         [[nodiscard]] int oldestRinging() const noexcept;
 
         EngineShape engineShape;
+        bool oversampling = true;
         int unitsHeld = unitCount; // 1 without earlier sounds: the other units are then null and stay idle
         std::array<std::unique_ptr<SoundUnit>, unitCount> units;
         std::array<UnitState, unitCount> state {};

@@ -110,10 +110,12 @@ namespace coolsynth::synth::v3
         /** The voices run near 96 kHz whatever the host's rate (D258): twice the host's up to 48 kHz, the host's own
             from 88.2 kHz, where twice would only double the work. */
         [[nodiscard]] static constexpr int oversampleFor(double hostSampleRate) noexcept { return hostSampleRate < 70000.0 ? 2 : 1; }
+        // prepare's `oversample` false runs the voices at the host's own rate whatever it is (the 808's Lightest
+        // accuracy, CoolSynth's D338): cheaper, the circuits' highs less exact.
         static constexpr float voiceHeadroom = 0.5f;
 
         /** Message thread. Allocates the voice bus for blocks up to maxBlockSize; longer blocks are split. */
-        void prepare(double hostSampleRate, int maxBlockSize, std::uint32_t seed);
+        void prepare(double hostSampleRate, int maxBlockSize, std::uint32_t seed, bool oversample = true);
         /** Where the 808's generators report their instruments' levels (CoolSynth's D313); null, none. */
         void setCircuitWatch(CircuitWatch* w) noexcept { watch = w; }
 

@@ -295,6 +295,17 @@ namespace coolsynth::synth::v3
             return which == 0 ? top.portVoltage(c42) : which == 1 ? middle.portVoltage(c44) : low.portVoltage(c46);
         }
         [[nodiscard]] bool usingTriggerParts() const noexcept { return usingFull; }
+        /** Every circuit's Newton tolerance (D259's setting; the 808's Lighter accuracy, CoolSynth's D338). */
+        void setNewtonTolerance(double volts) noexcept
+        {
+            full.setNewtonTolerance(volts);
+            tail.setNewtonTolerance(volts);
+            top.setNewtonTolerance(volts);
+            middle.setNewtonTolerance(volts);
+            low.setNewtonTolerance(volts);
+            mix.setNewtonTolerance(volts);
+        }
+
         /** The VCAs' last Newton steps (0 the top band, 1 the middle, 2 the low), for the cost tests. */
         [[nodiscard]] int vcaNewtonSteps(int which) const noexcept
         {

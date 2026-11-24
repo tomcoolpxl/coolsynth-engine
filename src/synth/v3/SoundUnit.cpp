@@ -104,13 +104,13 @@ namespace coolsynth::synth::v3
             sent.fill(-1);
     }
 
-    void SoundUnit::prepare(double sampleRate, int maxBlockSize, std::uint32_t seed)
+    void SoundUnit::prepare(double sampleRate, int maxBlockSize, std::uint32_t seed, bool oversample)
     {
         const int block = std::max(1, maxBlockSize);
         hostRate = std::max(1000.0, sampleRate);
-        parts[0]->prepare(sampleRate, block, seed);
+        parts[0]->prepare(sampleRate, block, seed, oversample);
         if (parts[1] != nullptr)
-            parts[1]->prepare(sampleRate, block, seed ^ 0xB0000u);
+            parts[1]->prepare(sampleRate, block, seed ^ 0xB0000u, oversample);
         // A key struck again under a new transpose is a note-off and a note-on; a mode change adds one event.
         for (auto& events : partEvents)
             events.assign(static_cast<std::size_t>(2 * coolsynth::synth::maxEngineEventsPerBlock + 2), {});

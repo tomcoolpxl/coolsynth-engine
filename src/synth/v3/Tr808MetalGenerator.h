@@ -198,6 +198,15 @@ namespace coolsynth::synth::v3
             // these sound.
             static constexpr std::array<int, instrumentCount> lights { CircuitWatch::cowbell, CircuitWatch::cymbal, CircuitWatch::openHat, CircuitWatch::closedHat };
             const std::uint32_t heard = params.watch != nullptr ? params.watch->heardMask() : CircuitWatch::allHeard;
+            // The Lighter accuracy (CoolSynth's D338): the looser Newton, and the VCAs only while their drum sounds.
+            if (const bool lighter = params.watch != nullptr && params.watch->lighter(); lighter != lighterNow)
+            {
+                lighterNow = lighter;
+                const double tolerance = lighter ? 1.0e-5 : 1.0e-7;
+                bell.setNewtonTolerance(tolerance);
+                cymbalCircuit.setNewtonTolerance(tolerance);
+                hats.setNewtonTolerance(tolerance);
+            }
 
             for (int s = 0; s < numSamples; ++s)
             {
@@ -226,12 +235,14 @@ namespace coolsynth::synth::v3
                     else
                         hats.trigger(k == openHat ? Tr808Hats::open : Tr808Hats::closed, volts);
                     // A panel watching one of these circuits captures this hit (CoolSynth's D318): the oscillators'
-                    // sheet at any hit, the hats' at the open hat's (its recording has the closed hat in it).
+                    // sheet at any hit, the hats' at an open hat (its recording has the closed hat in it) or a closed hat alone.
                     if (k == cowbell)
                         capture.begin<Tr808Cowbell>(params.watch, CircuitWatch::cowbell, cowbell);
                     else if (k == cymbal)
                         capture.begin<Tr808Cymbal>(params.watch, CircuitWatch::cymbal, cymbal);
                     else if (k == openHat)
+                        capture.begin<Tr808Hats>(params.watch, CircuitWatch::openHat, openHat);
+                    else if (capture.instrument() != openHat) // a closed hat alone (CoolSynth's D338): its own capture
                         capture.begin<Tr808Hats>(params.watch, CircuitWatch::openHat, openHat);
                     capture.begin<Tr808MetalBank>(params.watch, CircuitWatch::metalBankSheet, bankSheet);
                     // the board's nodes (D320): the hats' two lights share their circuit
@@ -258,8 +269,9 @@ namespace coolsynth::synth::v3
                         hats.processEnvelope(Tr808Hats::open);
                     if (running[closedHat])
                         hats.processEnvelope(Tr808Hats::closed);
-                    cymbalCircuit.processVcas(bank.high(), bank.low());
-                    hats.processVcas(bank.high());
+                    if (! lighterNow || running[cymbal])
+                        cymbalCircuit.processVcas(bank.high(), bank.low());
+                    hats.processVcas(bank.high(), ! lighterNow || running[openHat], ! lighterNow || running[closedHat]);
                     for (int k = 0; k < instrumentCount; ++k)
                     {
                         const auto i = static_cast<std::size_t>(k);
@@ -430,6 +442,7 @@ namespace coolsynth::synth::v3
         }
 
         double sampleRate = 96000.0;
+        bool lighterNow = false; // the Lighter accuracy as last applied (CoolSynth's D338)
         Tr808MetalBank bank;
         Tr808MetalTriggerBuffer buffer;
         Tr808Cowbell bell;

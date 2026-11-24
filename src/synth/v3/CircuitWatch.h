@@ -55,6 +55,11 @@ namespace coolsynth::synth::v3
         void hearOnly(std::uint32_t lightMask) noexcept { heard.store(lightMask, std::memory_order_relaxed); }
         [[nodiscard]] std::uint32_t heardMask() const noexcept { return heard.load(std::memory_order_relaxed); }
 
+        // ---- The 808 Metal's Lighter accuracy (CoolSynth's D338) ---------------------------------------------------
+        // On: its five swing VCAs run only while their drum sounds, and its circuits' Newton ends at 10 uV, not 100 nV.
+        void setLighter(bool on) noexcept { lighterOn.store(on, std::memory_order_relaxed); }
+        [[nodiscard]] bool lighter() const noexcept { return lighterOn.load(std::memory_order_relaxed); }
+
         /** How many times a generator has reported: the interface can tell a running engine from a stopped one. */
         void reported() noexcept { reports.fetch_add(1, std::memory_order_relaxed); }
         [[nodiscard]] unsigned int reportCount() const noexcept { return reports.load(std::memory_order_relaxed); }
@@ -169,6 +174,7 @@ namespace coolsynth::synth::v3
         std::array<std::array<std::atomic<float>, boardSlots>, lightCount> board {}, boardRest {};
         std::atomic<unsigned int> reports { 0 };
         std::atomic<std::uint32_t> heard { allHeard };
+        std::atomic<bool> lighterOn { false };
         std::atomic<int> watched { -1 }, frames { 0 };
         std::atomic<unsigned int> hits { 0 };
         std::atomic<bool> held { false };

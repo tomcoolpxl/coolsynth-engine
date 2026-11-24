@@ -6,7 +6,7 @@
 
 namespace coolsynth::synth::v3
 {
-    void Part::prepare(double hostSampleRate, int maxBlockSize, std::uint32_t seed)
+    void Part::prepare(double hostSampleRate, int maxBlockSize, std::uint32_t seed, bool oversample)
     {
         hostRate = std::max(1000.0, hostSampleRate);
         maxBlock = std::max(1, maxBlockSize);
@@ -22,7 +22,7 @@ namespace coolsynth::synth::v3
         Tr808SnareClapGenerator::warmUp(); // and the 808 Snare & Clap's snare, clap and maracas
         Tb303Generator::warmUp();  // and the TB-303's band-limited waves
 
-        oversampleFactor = oversampleFor(hostRate);
+        oversampleFactor = oversample ? oversampleFor(hostRate) : 1;
         const double voiceRate = hostRate * oversampleFactor;
         for (std::size_t i = 0; i < voices.size(); ++i)
             voices[i].prepare(voiceRate, seed + static_cast<std::uint32_t>(i) * 7919u);

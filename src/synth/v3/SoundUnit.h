@@ -94,7 +94,7 @@ namespace coolsynth::synth::v3
         explicit SoundUnit(EngineShape shape = {});
 
         /** Message thread. Every buffer for blocks up to maxBlockSize; `seed` sets the voices' randomness apart. */
-        void prepare(double sampleRate, int maxBlockSize, std::uint32_t seed);
+        void prepare(double sampleRate, int maxBlockSize, std::uint32_t seed, bool oversample = true);
         /** Where the 808's generators report their instruments' levels, both layers (CoolSynth's D313). */
         void setCircuitWatch(CircuitWatch* w) noexcept
         {
