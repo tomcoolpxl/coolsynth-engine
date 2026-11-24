@@ -53,10 +53,10 @@ namespace coolsynth::synth::v3
 
         [[nodiscard]] bool isDevilFish() const noexcept { return fish; }
 
-        /** The 303's Lighter accuracy (CoolSynth's D349): every circuit's solve to 1 uV but the oscillator's pitch,
-            which stays at 10 nV (its error drifts the pitch). Measured on a pattern of both voices: 8 % cheaper,
+        /** The looser solve of the 303's Light accuracy (CoolSynth's D349): every circuit to 1 uV but the oscillator's
+            pitch, which stays at 10 nV (its error drifts the pitch). Alone, on a pattern of both voices: 8 % cheaper,
             -106.5 dB rms against a circuit solved to 10 pV (Best -128.6), every third-octave band within 0.05 dB of
-            Best. Off: Best. Its Lightest adds the host's rate, which the app sets with prepare. */
+            Best. Off: Best. The app's Light also runs the voice at the host's rate, set with prepare. */
         static constexpr double lighterTolerance = 1.0e-6;
         void setLighter(bool on) noexcept
         {

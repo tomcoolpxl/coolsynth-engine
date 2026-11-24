@@ -224,8 +224,8 @@ public:
     {
         beginTest("the_lighter_accuracy_stays_close_and_goes_back");
         {
-            // The 303's Lighter accuracy (CoolSynth's D349): a resonant accented note at Lighter within -80 dB rms of
-            // Best (measured -106.5 dB over a long pattern), and Lighter switched off again the same bytes as Best.
+            // The looser solve of the 303's Light accuracy (CoolSynth's D349): a resonant accented note within -80 dB
+            // rms of Best (measured -106.5 dB over a long pattern), and switched off again the same bytes as Best.
             using coolsynth::synth::v3::Tb303Voice;
             const auto render = [](int mode)
             {
