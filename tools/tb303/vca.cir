@@ -5,10 +5,11 @@
 * (R122, C22), as the x0xb0x's schematic (Open Music Labs' redraw) draws them; page 5 leaves them unlabelled.
 *
 * Parameters: as env.cir (decay, acc, accent, ton, toff, taoff), and amp, freq (the audio sine), res (RESONANCE's
-* turn, 0..1), tend.
+* turn, 0..1), tend, q1area (the BA662's input pair, below).
 * The 12 V rail: IC16 makes it from the 5.333 V reference times 1 + R178 / R179 (2.2k / 1.8k), 11.85 V, not the 12 V
 * drawn (D275); with 5 % resistors a unit may sit anywhere from about 11.4 to 12.3 V. vcc sets it.
 .param decay=0.5 acc=0 accent=0.5 ton=10m toff=72.5m taoff=135m amp=0.3 freq=440 res=0.5 vcc=11.851 tend=0.5
+.param q1area=1
 .param ka=3.47
 .param tdec={(exp(ka*decay)-1)/(exp(ka)-1)} rdec={max(1Meg*tdec, 1)}
 .param racc1={max(50k*accent, 1)} racc3={max(50k*(1-accent), 1)}
@@ -115,8 +116,10 @@ Q32 nc32 nb32 ne32 QEM
 R130 ne32 0 100
 D27V n27 niabc DEM
 
-* IC15, the BA662A: pin 9 and pin 4 to 12 V, pin 5 to ground.
-XIC15 niabc nin2 nin3 vcc 0 nota nota nvout vcc BA662
+* IC15, the BA662A: pin 9 and pin 4 to 12 V, pin 5 to ground. q1area: its input pair's area against the chip's
+* other transistors (1 as drawn); fitted to Din Sync's unit at 22, pin 1 some 80 mV lower for the same current
+* (CoolSynth's D324), so Q31 starts a note out of saturation and the VCA opens at once.
+XIC15 niabc nin2 nin3 vcc 0 nota nota nvout vcc BA662 params: q1area={q1area}
 
 * Its output's load: R128 (220k) and R127 (47k) side by side, R129 (22k) to C40's 5.333 V (R162 2.2k); the buffer
 * (pins 7, 8) out through C38 to the mixer (taken as 100k).
@@ -133,10 +136,10 @@ RMIX nout 0 100k
 * Wilson mirrors (Q3A, Q3B, Q5B; Q4A, Q4B, Q5A) and an NPN one (Q6A, Q6B, Q7B) make pin 6 the difference of the
 * pair's currents; pin 7 to pin 8 a complementary follower (Q7A, Q10A, R21 11k), biased by Q9A mirroring Q9B's
 * current from pin 4 through R20 (50k). Transistors: generic integrated NPN (hFE 150) and lateral PNP (hFE 50).
-.subckt BA662 p1 p2 p3 p4 p5 p6 p7 p8 p9
-Q1A p1 p1 e1a NI
+.subckt BA662 p1 p2 p3 p4 p5 p6 p7 p8 p9 params: q1area=1
+Q1A p1 p1 e1a NI area={q1area}
 R1A e1a p5 500
-Q1B t p1 e1b NI
+Q1B t p1 e1b NI area={q1area}
 R1B e1b p5 500
 Q2A ca p2 t NI
 Q2B cb p3 t NI

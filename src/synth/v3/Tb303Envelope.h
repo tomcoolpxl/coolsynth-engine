@@ -19,7 +19,8 @@
                     the filter's 3.31 V) as the reference has it
         Control     Q31 from GATE (D35, R133, R131) into the BA662's pin 1, its base on C42 (1 uF, refilled through
                     R123), which Q32 empties at each trigger (D36 from Q38's collector, R134, C41); pin 1 as the
-                    chip's Q1A, a diode-wired transistor over 500 Ohm (with Q1B's base current: IS (1 + 2 / hFE))
+                    chip's Q1A, a diode-wired transistor over 500 Ohm (with Q1B's base current: IS (1 + 2 / hFE)),
+                    its area fitted (chipInputArea)
 
     Slow, so it runs near 48 kHz, half of the voice's 96 kHz (D294; its fastest part, C62's charge through R152, is
     100 us), its outputs interpolated linearly to the voice's samples (some 60 us late at the attack). Its own
@@ -45,6 +46,11 @@ namespace coolsynth::synth::v3
         static constexpr double npnRecombination = 6.734e-15, npnRecombinationEmission = 1.259; // QEM's ISE, NE
         static constexpr double jfetBeta = 0.89e-3, jfetPinch = -1.5, jfetLambda = 2.0e-3; // Q39, the 2SK30(Y)
         static constexpr double chipSaturation = 1.0e-15, chipBetaF = 150.0;               // the BA662's NPNs
+        /** The BA662's input pair (Q1A here, Q1B in Tb303Vca) against its other transistors, fitted to Din Sync's
+            unit (CoolSynth's D324): 22 times their area puts pin 1 some 80 mV lower for the same current, as Lemus's
+            ro-mono-303 fitted the same unit. Q31 then starts a note out of saturation and the VCA opens at once;
+            at 1 (as drawn) it swelled some 8 dB over the note's first 10 ms, brass where the real unit plucks. */
+        static constexpr double chipInputArea = 22.0;
         static constexpr double controlRate = 48000.0; // near which it runs: a quarter of 192 kHz, half of 96 kHz
 
         /** devilFish: R123 refills C42 from an input of its own (the volume envelope's sustain; CoolSynth's D309), not
@@ -258,7 +264,7 @@ namespace coolsynth::synth::v3
             circuit.addResistor(24, 25, 22.0e3);                                                 // R120
             diode(25, 26);                                                                       // D27
             // Pin 1: Q1A (with Q1B's base current) over its 500 Ohm.
-            circuit.addDiode(26, 27, chipSaturation * (1.0 + 2.0 / chipBetaF), thermal);
+            circuit.addDiode(26, 27, chipInputArea * chipSaturation * (1.0 + 2.0 / chipBetaF), thermal);
             circuit.addResistor(27, 0, 500.0);
             // The VCA's control current.
             diode(9, 28);                                                                        // D35

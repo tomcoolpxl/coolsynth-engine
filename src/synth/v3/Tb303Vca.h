@@ -4,13 +4,15 @@
 #include <cmath>
 
 #include "CircuitWdf.h"
+#include "Tb303Envelope.h"
 #include "Tb303Filter.h"
 
 /*
     The Roland TB-303's VCA (D275, D293): IC15, the BA662A, as its transistors as Open Music Labs reverse-engineered it
     (tools/tb303/vca.cir, its reference), with its inputs' and output's networks. Two circuits:
 
-        Chip        Q1B mirrors pin 1's current (its base at pin 1's voltage, from Tb303Envelope) into the pair Q2A
+        Chip        Q1B mirrors pin 1's current (its base at pin 1's voltage, from Tb303Envelope; its area Q1A's,
+                    Tb303Envelope::chipInputArea, fitted to Din Sync's unit) into the pair Q2A
                     (pin 2) and Q2B (pin 3); two PNP Wilson mirrors (Q3A, Q3B, Q5B; Q4A, Q4B, Q5A) and an NPN one
                     (Q6A, Q6B, Q7B) make pin 6 the difference of the pair's currents. Pins 2 and 3 at C37's 5.333 V
                     (R126, R125, R124); the audio into pin 3 through C21 and R121 (the filter's output) and C22 and
@@ -123,7 +125,8 @@ namespace coolsynth::synth::v3
             inPin1 = chip.addInput(5);
             auto npn = [this](int c, int b, int e) { chip.addTransistor(c, b, e, saturation, npnBetaF, npnBetaR, thermal, npnEarly); };
             auto pnp = [this](int c, int b, int e) { chip.addPnpTransistor(c, b, e, saturation, pnpBetaF, pnpBetaR, thermal, pnpEarly); };
-            npn(7, 5, 6);                                                                        // Q1B
+            chip.addTransistor(7, 5, 6, Tb303Envelope::chipInputArea * saturation, npnBetaF, npnBetaR, thermal,
+                               npnEarly);                                                        // Q1B, as Q1A
             chip.addResistor(6, 0, 500.0);                                                       // its emitter's 500 Ohm
             npn(8, 16, 7);                                                                       // Q2A
             npn(9, 17, 7);                                                                       // Q2B

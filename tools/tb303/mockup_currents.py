@@ -43,8 +43,8 @@ _NGSPICE_PLACES = [os.environ.get("COOLSYNTH_NGSPICE", "")] + [
 NGSPICE = next((p for p in _NGSPICE_PLACES if p and os.path.isfile(p)), _NGSPICE_PLACES[1])
 NETLIST = os.path.join(HERE, "voice.cir")
 
-# The app's default knobs (saw).
-KNOBS = {"cutoff": 0.42, "res": 0.72, "envmod": 0.55, "decay": 0.48, "accent": 0.62, "sq": 0, "tune": 0.5}
+# The app's default knobs (saw), and the BA662's input pair as the engine has it fitted (CoolSynth's D324).
+KNOBS = {"cutoff": 0.42, "res": 0.72, "envmod": 0.55, "decay": 0.48, "accent": 0.62, "sq": 0, "tune": 0.5, "q1area": 22}
 # The op-amps' solver aids, left out of the drawing.
 AIDS = {"ga", "ria", "cia", "dcpa", "vcpa", "dcna", "vcna", "gb", "rib", "cib", "dcpb", "vcpb", "dcnb", "vcnb"}
 STEP = 20e-6
@@ -92,6 +92,8 @@ def parse(lines):
             continue
         if low.startswith(".subckt"):
             f = line.split()
+            if "params:" in (w.lower() for w in f):
+                f = f[:[w.lower() for w in f].index("params:")]
             current = {"ports": [p.lower() for p in f[2:]], "elements": []}
             subckts[f[1].lower()] = current
         elif low.startswith(".ends"):
@@ -122,6 +124,8 @@ def flatten(subckts, lines, prefix, portmap, out):
         name = f[0].lower()
         kind = name[0]
         if kind == "x":
+            if "params:" in (w.lower() for w in f):  # a subcircuit's parameters follow its name
+                f = f[:[w.lower() for w in f].index("params:")]
             sub = subckts[f[-1].lower()]
             args = [node(n) for n in f[1:-1]]
             flatten(subckts, sub["elements"], (prefix + name + "."), dict(zip(sub["ports"], args)), out)

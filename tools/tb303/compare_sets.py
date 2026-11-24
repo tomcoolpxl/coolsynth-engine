@@ -42,7 +42,7 @@ def render(values, accented, tm3, c11, out, model=None):
     command = [sys.executable, "-I", os.path.join(HERE, "render.py"), "voice.cir", "--nodes", "nout", "--tend", "0.6",
                "--step", "4e-6", "--out", out]
     sets = dict(values, cv=2.0, sq=0, ton=TON, toff=TON + 0.25, taoff=TON + 0.25, acc=12 if accented else 0, tm3=tm3,
-                c11=c11)
+                c11=c11, q1area=22)  # the BA662's input pair as fitted (CoolSynth's D324)
     for k, v in sets.items():
         command += ["--set", "{}={}".format(k, v)]
     subprocess.run(command, check=True, capture_output=True)

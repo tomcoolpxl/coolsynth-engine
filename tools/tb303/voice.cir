@@ -42,6 +42,7 @@
 .param ton=10m
 .param toff=72.5m
 .param taoff=135m
+.param q1area=1
 .param tdec={(exp(ka*decay)-1)/(exp(ka)-1)}
 .param rdec={max(1Meg*tdec, 1)}
 .param racc1={max(50k*accent, 1)}
@@ -258,7 +259,7 @@ C41 nb32 0 0.1u
 Q32 nc32 nb32 ne32 QEM
 R130 ne32 0 100
 D27V n27 niabc DEM
-XIC15 niabc nin2 nin3 vcc 0 nota nota nvout vcc BA662
+XIC15 niabc nin2 nin3 vcc 0 nota nota nvout vcc BA662 params: q1area={q1area}
 R128 nota nn 220k
 R127 nota nn 47k
 R129 nn nq 22k
@@ -268,10 +269,10 @@ C38 nvout nout 1u
 RMIX nout 0 100k
 .ends
 
-.subckt BA662 p1 p2 p3 p4 p5 p6 p7 p8 p9
-Q1A p1 p1 e1a NI
+.subckt BA662 p1 p2 p3 p4 p5 p6 p7 p8 p9 params: q1area=1
+Q1A p1 p1 e1a NI area={q1area}
 R1A e1a p5 500
-Q1B t p1 e1b NI
+Q1B t p1 e1b NI area={q1area}
 R1B e1b p5 500
 Q2A ca p2 t NI
 Q2B cb p3 t NI
