@@ -104,6 +104,16 @@ namespace coolsynth::synth::v3
         /** Filter Tracking's current an octave moves the cutoff by, into Q10's base (some 2.15k to VQ9). */
         static constexpr double octaveAmps = 8.3e-6;
 
+        /** RESONANCE's track (VR4, 50k B, two gangs): the share of the pot at a turn of the knob, fitted to Din Sync's
+            unit (CoolSynth's D324). Its marks fall on a straight track at about 0.10 to 0.15 (a quarter turn), 0.5,
+            0.88 and 1: an S-shaped track, Whittle's "log curve at both ends". t^2 / (t^2 + (1 - t)^2) gives 0.10, 0.5,
+            0.90 and 1; a quarter turn then comes within 1.7 dB of the unit where it was 4.5 dB quiet. */
+        static double resonanceTrack(double turn) noexcept
+        {
+            const double t = std::clamp(turn, 0.0, 1.0), u = 1.0 - t;
+            return t * t / (t * t + u * u);
+        }
+
         /** The panel's knobs, each its turn 0..1, and the WAVEFORM switch. */
         struct Knobs
         {
@@ -129,7 +139,7 @@ namespace coolsynth::synth::v3
         {
             knobs = k;
             osc->setTrimmers(trim.tm4, trim.tm5, k.tuning, trim.c11);
-            filter->setKnobs(k.cutoff, k.resonance, k.envMod, trim.tm3);
+            filter->setKnobs(k.cutoff, resonanceTrack(k.resonance), k.envMod, trim.tm3);
             env->setKnobs(k.decay, k.accent);
             if (fish)
                 setFishEnvelope();

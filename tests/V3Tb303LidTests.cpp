@@ -287,6 +287,8 @@ public:
                     return { 0.02, 0.7 };
                 if (n == "xvca.niabc") // the VCA's control falls a few ms sooner after the gate (D293's 30 mV)
                     return { 0.02, 0.55 };
+                if (n == "xvcf.c19.i") // the ladder's top capacitor, the ring itself: at the default knob's resonance
+                    return { 0.02, 0.4 }; // on the fitted track (0.87 of the pot, CoolSynth's D324) its phase drift shows
                 // The filter's residual (1.5 to 5 % off vcf.cir, the ring's amplitude a third under ngspice's at
                 // the accent) at moments that fall at any phase of the oscillator and the ring.
                 return { 0.02, 0.25 };
