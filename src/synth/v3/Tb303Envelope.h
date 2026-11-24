@@ -46,12 +46,36 @@ namespace coolsynth::synth::v3
         static constexpr double chipSaturation = 1.0e-15, chipBetaF = 150.0;               // the BA662's NPNs
         static constexpr double controlRate = 48000.0; // near which it runs: a quarter of 192 kHz, half of 96 kHz
 
-        Tb303Envelope()
+        /** devilFish: R123 refills C42 from an input of its own (the volume envelope's sustain; CoolSynth's D308), not
+            from the 12 V rail; off, the circuit is the stock one, part for part. */
+        explicit Tb303Envelope(bool devilFish = false) : fish(devilFish)
         {
             circuit.setNewtonLimit(40);
             circuit.setJacobianReuse(true);
             build();
         }
+
+        /** The Devil Fish's envelopes (CoolSynth's D308), on a Devil Fish only:
+                normalOhms, accentOhms  the main envelope's decay resistance (R138 and the decay pot) on plain and
+                                        accented notes: Normal Decay and Accent Decay, where the stock one shorts DECAY
+                vegOhms                 R123: the volume envelope's decay (C42's refill)
+                vegTopVolts             what R123 refills C42 toward: 12 V decays to silence, lower holds the note
+                sweepOn                 the Accent Sweep switch: off, IC12A stays open and the ACCENT knob gets nothing */
+        void setDevilFish(double normalOhms, double accentOhms, double vegOhms, double vegTopVolts, bool sweepOn) noexcept
+        {
+            if (!fish)
+                return;
+            fishNormalOhms = std::max(normalOhms, 1.0);
+            fishAccentOhms = std::max(accentOhms, 1.0);
+            fishSweepOn = sweepOn;
+            vegTop = vegTopVolts;
+            circuit.setResistance(rR123, std::max(vegOhms, 1.0));
+            circuit.setResistance(rR138, fishR138);
+            circuit.setResistance(sDecayShort, switchOff);
+            circuit.setResistance(rDecay, accented ? fishAccentOhms : fishNormalOhms);
+            circuit.setResistance(sAccentPass, accented && fishSweepOn ? switchOn : switchOff);
+        }
+        static constexpr double fishR138 = 4.7e3;
 
         /** The chord method (D281), on by default; off solves each step exactly, for the tests. */
         void setJacobianReuse(bool on) noexcept { circuit.setJacobianReuse(on); }
@@ -68,7 +92,8 @@ namespace coolsynth::synth::v3
         {
             constexpr double k = 3.47; // the audio taper, as vcf.cir and env.cir have it
             const double d = (std::exp(k * std::clamp(decay, 0.0, 1.0)) - 1.0) / (std::exp(k) - 1.0);
-            circuit.setResistance(rDecay, std::max(1.0e6 * d, 1.0));
+            if (!fish) // a Devil Fish's DECAY is the volume envelope's (setDevilFish)
+                circuit.setResistance(rDecay, std::max(1.0e6 * d, 1.0));
             const double a = std::clamp(accent, 0.0, 1.0);
             circuit.setResistance(rAccentTop, std::max(50.0e3 * (1.0 - a), 1.0));
             circuit.setResistance(rAccentBottom, std::max(50.0e3 * a, 1.0));
@@ -80,6 +105,12 @@ namespace coolsynth::synth::v3
             if (on == accented)
                 return;
             accented = on;
+            if (fish)
+            {
+                circuit.setResistance(rDecay, on ? fishAccentOhms : fishNormalOhms);
+                circuit.setResistance(sAccentPass, on && fishSweepOn ? switchOn : switchOff);
+                return;
+            }
             circuit.setResistance(sDecayShort, on ? switchOn : switchOff);
             circuit.setResistance(sAccentPass, on ? switchOn : switchOff);
         }
@@ -145,6 +176,8 @@ namespace coolsynth::synth::v3
             circuit.setInput(inReference, reference);
             circuit.setInput(inGate, gateVolts);
             circuit.setInput(inVq9, vq9);
+            if (fish)
+                circuit.setInput(inVegTop, vegTop);
             // The accent's load as a current behind 1 GOhm, its volts from the wiper's last voltage.
             circuit.setSource(sAccentLoad, circuit.probe(pAccent) - accentLoadAmps * leakOhms);
         }
@@ -207,7 +240,7 @@ namespace coolsynth::synth::v3
             circuit.addJfetChannel(21, 0, jfetBeta, jfetPinch, jfetLambda);                      // Q39
             circuit.addResistor(21, 4, 60.0e3);                                                  // ENV MOD and R61
             // The decay.
-            circuit.addResistor(15, 16, 68.0e3);                                                 // R138
+            rR138 = circuit.addResistor(15, 16, 68.0e3);                                         // R138
             rDecay = circuit.addResistor(16, 17, 1.0e6);                                         // DECAY
             sDecayShort = circuit.addResistor(16, 17, switchOff);                                // IC12B
             diode(17, 18);                                                                       // D28
@@ -231,7 +264,9 @@ namespace coolsynth::synth::v3
             circuit.addResistor(28, 29, 2.2e3);                                                  // R133
             circuit.addResistor(29, 30, 220.0e3);                                                // R131
             pnp(26, 31, 30);                                                                     // Q31
-            circuit.addResistor(1, 31, 1.5e6);                                                   // R123
+            if (fish)
+                inVegTop = circuit.addInput(36);                                                 // the sustain's level
+            rR123 = circuit.addResistor(fish ? 36 : 1, 31, 1.5e6);                               // R123
             circuit.addCapacitor(31, 0, 1.0e-6);                                                 // C42
             circuit.addResistor(31, 32, 100.0);                                                  // R132
             diode(13, 33);                                                                       // D36
@@ -259,10 +294,13 @@ namespace coolsynth::synth::v3
         static constexpr double leakOhms = 1.0e9;
         // 66 ports: 40 parts (4 leaks, the accent's load) and 26 nonlinear (8 transistors, 12 one-ports: the diodes,
         // D27, Q1A, Q39, three recombination diodes)
-        wdf::Circuit<35, 66, 4, 0, 26, 7> circuit;
+        wdf::Circuit<36, 66, 5, 0, 26, 7> circuit; // a Devil Fish's sustain input its 36th node and 5th input
 
         double sampleRate = 192000.0, gateVolts = 0.0;
         bool accented = false;
+        bool fish = false, fishSweepOn = true;
+        double fishNormalOhms = 68.0e3, fishAccentOhms = 1.0, vegTop = supply;
+        int rR138 = 0, rR123 = 0, inVegTop = 0;
         int rateDivider = 4, phase = 4;
         double now[outputs] {}, before[outputs] {}, value[outputs] {};
         int inSupply = 0, inReference = 0, inGate = 0, inVq9 = 0;

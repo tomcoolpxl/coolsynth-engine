@@ -76,6 +76,7 @@ if(BUILD_TESTING AND COOLSYNTH_ENGINE_TESTS)
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3ShaperTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3StringTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tb303CircuitTests.cpp"
+            "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tb303DevilFishTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tb303Tests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tr808DrumsTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tr808MetalTests.cpp"

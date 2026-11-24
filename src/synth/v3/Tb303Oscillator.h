@@ -89,6 +89,10 @@ namespace coolsynth::synth::v3
             shaper.setCapacitance(cC11, c11);
         }
 
+        /** The Devil Fish's Slide Time (CoolSynth's D308): resistance in series with the ladder's 100 kOhm (its 3.3k
+            protection and a 500k pot), so C35 charges slower in a slide. 0 is the stock ladder. */
+        void setSlideOhms(double extra) noexcept { pitch.setResistance(rLadder, 100.0e3 + std::max(extra, 0.0)); }
+
         /** The slide: IC12 puts C35 on the ladder (true) or on IC11b's output (false). */
         void setSlide(bool on) noexcept
         {
@@ -400,7 +404,7 @@ namespace coolsynth::synth::v3
             inReference = pitch.addInput(2);
             inLadder = pitch.addInput(3);
             inCollector = pitch.addInput(4);
-            pitch.addResistor(3, 5, 100.0e3);                                                  // the ladder's 100 kOhm
+            rLadder = pitch.addResistor(3, 5, 100.0e3);                                        // the ladder's 100 kOhm
             rS8 = pitch.addResistor(5, 6, switchOff);                                          // IC12, pins 8 and 9
             rS10 = pitch.addResistor(6, 7, switchOn);                                          // IC12, pins 10 and 11
             pitch.addCapacitor(6, 0, 0.22e-6);                                                 // C35
@@ -461,7 +465,7 @@ namespace coolsynth::synth::v3
         bool factorChosen = false;
         std::array<double, maxTaps> kernel {}, historySaw {}, historySquare {};
         int inSupply = 0, inReference = 0, inLadder = 0, inCollector = 0, rS8 = 0, rS10 = 0;
-        int rTm4a = 0, rTm4b = 0, rTm5 = 0, rTuneA = 0, rTuneB = 0, pCv = 0, pCollector = 0;
+        int rTm4a = 0, rTm4b = 0, rTm5 = 0, rTuneA = 0, rTuneB = 0, pCv = 0, pCollector = 0, rLadder = 0;
         int shaperSupply = 0, shaperReference = 0, sFollower = 0, cC11 = 0, pSquare = 0, pSaw = 0;
     };
 }

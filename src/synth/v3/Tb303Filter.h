@@ -46,8 +46,10 @@ namespace coolsynth::synth::v3
         static constexpr double leakOhms = 1.0e9;   // across each rung, as SPICE's GMIN
 
         /** loadedByVca: the RESONANCE wiper also feeds the VCA (C22, R122 into its pin 3, at 5.333 V as AC ground), as in
-            the whole voice (D295); off, the wiper as vcf.cir has it alone. */
-        explicit Tb303Filter(bool loadedByVca = false)
+            the whole voice (D295); off, the wiper as vcf.cir has it alone. devilFish: a current into Q10's base, the
+            control's summing node, for the Devil Fish's Filter Tracking and Filter FM (CoolSynth's D308); off, the
+            circuit is the stock one, part for part. */
+        explicit Tb303Filter(bool loadedByVca = false, bool devilFish = false)
         {
             converter.setNewtonLimit(40);
             loop.setNewtonLimit(40);
@@ -59,14 +61,46 @@ namespace coolsynth::synth::v3
                 loop.addCapacitor(27, 34, 0.01e-6); // the VCA's C22
                 loop.addResistor(34, 2, 100.0e3);   // and R122, into pin 3
             }
+            if (devilFish)
+                sFish = converter.addSource(8, 0, sourceOhms);
+            fish = devilFish;
         }
+
+        /** The Devil Fish's changes to the stock parts (Whittle's manual, the x0xb0x mod guide; CoolSynth's D308), all
+            back to the stock values with the defaults:
+                inputGain   R62 as 220k over it (0 opens it: no oscillator into the filter; 66.6 at most)
+                wideRanges  Env Mod to zero and three times (R61 shorted, R63 with 100k across), Cut Off lower and
+                            higher (R47 with 4.7k across; R73 at 33k and TM3 at half its resistance: an octave up at
+                            the top, some 2.4 down at the bottom, as measured)
+                highResonance  R97 at 5.1k: the loop's gain doubled, the filter oscillating at mid and high cutoffs
+                c13, r46    the accent sweep's capacitor and its charging resistor (the Sweep Speed switch)
+                bass        C21, the VCA's input coupling here, at 0.1 uF (the loop carries the VCA's input as its load) */
+        void setChanges(double inputGain, bool wideRanges, bool highResonance, double c13, double r46, bool bass) noexcept
+        {
+            loop.setResistance(rR62, inputGain > 1.0e-6 ? std::max(220.0e3 / inputGain, 1.0) : 1.0e9);
+            converter.setResistance(rR61, wideRanges ? 1.0 : 10.0e3);
+            converter.setResistance(rR63, wideRanges ? 220.0e3 * 100.0e3 / 320.0e3 : 220.0e3);
+            converter.setResistance(rR47, wideRanges ? 10.0e3 * 4.7e3 / 14.7e3 : 10.0e3);
+            converter.setResistance(rR73, wideRanges ? 33.0e3 : 100.0e3);
+            tm3Share = wideRanges ? 0.5 : 1.0; // TM3 turned on: measured, the top an octave up (0.93), half turn +0.19
+            converter.setResistance(rTm3, std::max(470.0e3 * tm3Turn * tm3Share, 1.0));
+            loop.setResistance(rR97, highResonance ? 5.1e3 : 10.0e3);
+            converter.setCapacitance(cC13, c13);
+            converter.setResistance(rR46, r46);
+            r46Ohms = r46;
+            loop.setCapacitance(cC21, bass ? 0.1e-6 : 0.01e-6);
+        }
+
+        /** The Devil Fish's current into the summing node (amps; Filter Tracking and Filter FM), taken at the next
+            sample. Nothing on a stock filter. */
+        void setFishCurrent(double amps) noexcept { fishAmps = amps; }
 
         /** The RESONANCE wiper's voltage (the VCA's second input). */
         [[nodiscard]] double resonanceWiper() const noexcept { return loop.probe(pResWiper); }
         /** The current D24 draws from the ACCENT knob's wiper (into R46): the envelope's load. */
         [[nodiscard]] double accentCurrent() const noexcept
         {
-            return (converter.probe(pD24) - converter.probe(pR46)) / 47.0e3;
+            return (converter.probe(pD24) - converter.probe(pR46)) / r46Ohms;
         }
 
         /** The chord method on both circuits (D281), on by default; off solves each sample exactly, for the tests. */
@@ -101,7 +135,8 @@ namespace coolsynth::synth::v3
             converter.setResistance(rEnv1, std::max(50.0e3 * te, 1.0));
             converter.setResistance(rResB1, std::max(50.0e3 * r, 1.0));
             converter.setResistance(rResB3, std::max(50.0e3 * (1.0 - r), 1.0));
-            converter.setResistance(rTm3, std::max(470.0e3 * std::clamp(tm3, 0.0, 1.0), 1.0));
+            tm3Turn = std::clamp(tm3, 0.0, 1.0);
+            converter.setResistance(rTm3, std::max(470.0e3 * tm3Turn * tm3Share, 1.0));
             loop.setResistance(rResA3, std::max(50.0e3 * (1.0 - r), 1.0));
             loop.setResistance(rResA1, std::max(50.0e3 * r, 1.0));
         }
@@ -174,6 +209,8 @@ namespace coolsynth::synth::v3
             converter.setInput(convReference, reference);
             converter.setInput(convEnvelope, envelope);
             converter.setInput(convAccent, accent);
+            if (fish)
+                converter.setSource(sFish, converter.probe(pNb10) - fishAmps * sourceOhms);
             loop.setInput(loopSupply, supply);
             loop.setInput(loopReference, reference);
             loop.setInput(loopIn, input);
@@ -213,19 +250,19 @@ namespace coolsynth::synth::v3
             converter.addResistor(10, 5, 2.2e3);                                                   // R69
             rCut3 = converter.addResistor(1, 11, 25.0e3);                                          // CUTOFF above its wiper
             rCut1 = converter.addResistor(11, 12, 25.0e3);                                         // and below
-            converter.addResistor(12, 7, 10.0e3);                                                  // R47
-            converter.addResistor(11, 13, 100.0e3);                                                // R73
+            rR47 = converter.addResistor(12, 7, 10.0e3);                                           // R47
+            rR73 = converter.addResistor(11, 13, 100.0e3);                                         // R73
             rTm3 = converter.addResistor(13, 9, 80.0e3);                                           // TM3
             converter.addResistor(8, 7, 2.2e3);                                                    // R71
             rEnv3 = converter.addResistor(3, 14, 25.0e3);                                          // ENV MOD above its wiper
             rEnv1 = converter.addResistor(14, 15, 25.0e3);                                         // and below
-            converter.addResistor(15, 7, 10.0e3);                                                  // R61
-            converter.addResistor(14, 8, 220.0e3);                                                 // R63
+            rR61 = converter.addResistor(15, 7, 10.0e3);                                           // R61
+            rR63 = converter.addResistor(14, 8, 220.0e3);                                          // R63
             converter.addDiode(4, 16, diodeSaturation, thermal * diodeEmission);                   // D24
-            converter.addResistor(16, 17, 47.0e3);                                                 // R46
+            rR46 = converter.addResistor(16, 17, 47.0e3);                                          // R46
             rResB1 = converter.addResistor(17, 18, 25.0e3);                                        // RESONANCE's second gang
             rResB3 = converter.addResistor(18, 19, 25.0e3);
-            converter.addCapacitor(19, 0, 1.0e-6);                                                 // C13
+            cC13 = converter.addCapacitor(19, 0, 1.0e-6);                                          // C13
             converter.addResistor(18, 8, 100.0e3);                                                 // R72
             pNb10 = converter.addProbe(8);
             pNb11 = converter.addProbe(9);
@@ -248,7 +285,7 @@ namespace coolsynth::synth::v3
             loopIn = loop.addInput(3);
             loop.addResistor(1, 4, 100.0);                                                         // R95
             loop.addCapacitor(4, 0, 47.0e-6);                                                      // C28
-            loop.addResistor(3, 5, 220.0e3);                                                       // R62
+            rR62 = loop.addResistor(3, 5, 220.0e3);                                                // R62
             loop.addCapacitor(5, 6, 1.0e-6);                                                       // C17
             loop.addResistor(2, 7, 2.2e3);                                                         // R68
             loop.addCapacitor(7, 0, 10.0e-6);                                                      // C16
@@ -293,7 +330,7 @@ namespace coolsynth::synth::v3
             rResA3 = loop.addResistor(26, 27, 25.0e3);                                             // RESONANCE above its wiper
             rResA1 = loop.addResistor(27, 0, 25.0e3);                                              // and below
             loop.addResistor(26, 28, 220.0e3);                                                     // R121, the VCA's input
-            loop.addCapacitor(28, 2, 0.01e-6);                                                     // C21
+            cC21 = loop.addCapacitor(28, 2, 0.01e-6);                                              // C21
             loop.addCapacitor(27, 29, 1.0e-6);                                                     // C15
             loop.addResistor(29, 30, 2.2e3);                                                       // R67
             loop.addResistor(2, 31, 100.0e3);                                                      // R66
@@ -302,7 +339,7 @@ namespace coolsynth::synth::v3
             loop.addTransistor(1, 30, 32, npnSaturation, npnBetaF, npnBetaR, thermal, npnEarly);            // Q18
             loop.addResistor(32, 0, 10.0e3);                                                       // R94
             loop.addCapacitor(32, 33, 1.0e-6);                                                     // C23
-            loop.addResistor(33, 8, 10.0e3);                                                       // R97
+            rR97 = loop.addResistor(33, 8, 10.0e3);                                                // R97
             sCollector = loop.addSource(18, 0, sourceOhms);                                        // Q11's collector
             pTp6 = loop.addProbe(25);
             pVcf = loop.addProbe(26);
@@ -313,10 +350,13 @@ namespace coolsynth::synth::v3
             pResWiper = loop.addProbe(27);
         }
 
-        wdf::Circuit<19, 26, 5, 0, 7, 7> converter;
+        wdf::Circuit<19, 27, 5, 0, 7, 7> converter; // 26 ports, one more in a Devil Fish
         wdf::Circuit<34, 69, 3, 0, 22, 7> loop; // 67 ports counted from buildLoop, 2 more loaded by the VCA
 
         double tailAmps = 0.5e-3, collectorAmps = 0.0, lastNe12 = 4.8, lastNe21 = 2.9;
+        bool fish = false;
+        double fishAmps = 0.0, r46Ohms = 47.0e3, tm3Turn = 0.35, tm3Share = 1.0;
+        int sFish = 0, rR47 = 0, rR73 = 0, rR61 = 0, rR63 = 0, rR46 = 0, cC13 = 0, rR62 = 0, cC21 = 0, rR97 = 0;
         int convSupply = 0, convReference = 0, convEnvelope = 0, convAccent = 0, convNe12 = 0;
         int rCut3 = 0, rCut1 = 0, rTm3 = 0, rEnv3 = 0, rEnv1 = 0, rResB1 = 0, rResB3 = 0;
         int pNb10 = 0, pNb11 = 0, pNc11 = 0, pN13 = 0, pVq9 = 0, pD24 = 0, pR46 = 0, pResWiper = 0;

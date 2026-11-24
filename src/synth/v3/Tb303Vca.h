@@ -58,6 +58,10 @@ namespace coolsynth::synth::v3
             buffer.setSampleRate(rate);
         }
 
+        /** The Devil Fish's fuller bass (CoolSynth's D308): C21, the filter's coupling into pin 3, at 0.1 uF, not
+            0.01 uF (32 Hz down 1 dB, not 5 dB, as Whittle measures it). */
+        void setFullBass(bool on) noexcept { chip.setCapacitance(cC21, on ? 0.1e-6 : 0.01e-6); }
+
         /** At rest with this pin 1 voltage and no audio. */
         void settle(double pinOneVolts) noexcept
         {
@@ -135,7 +139,7 @@ namespace coolsynth::synth::v3
             chip.addCapacitor(15, 0, 10.0e-6);                                                   // C37
             chip.addResistor(15, 16, 2.2e3);                                                     // R125
             chip.addResistor(15, 17, 2.2e3);                                                     // R124
-            chip.addCapacitor(3, 18, 0.01e-6);                                                   // C21
+            cC21 = chip.addCapacitor(3, 18, 0.01e-6);                                            // C21
             chip.addResistor(18, 17, 220.0e3);                                                   // R121
             chip.addCapacitor(4, 19, 0.01e-6);                                                   // C22
             chip.addResistor(19, 17, 100.0e3);                                                   // R122
@@ -177,7 +181,7 @@ namespace coolsynth::synth::v3
         wdf::Circuit<7, 13, 2, 0, 7, 3> buffer;  // 13 ports: 5 parts, a leak, 3 transistors' 6, 1 diode
 
         double baseAmps = 0.0, lastPin6 = 5.333;
-        int inSupply = 0, inReference = 0, inFilter = 0, inResonance = 0, inPin1 = 0, sBase = 0, pOut = 0;
+        int inSupply = 0, inReference = 0, inFilter = 0, inResonance = 0, inPin1 = 0, sBase = 0, pOut = 0, cC21 = 0;
         int bufSupply = 0, bufIn = 0, pBase = 0, pPin8 = 0, pOutput = 0;
     };
 }
