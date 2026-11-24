@@ -67,7 +67,7 @@ namespace coolsynth::synth
         float velocity = 1.0f / 127.0f; // a step's velocity; the 808 kit strikes it at its lowest trigger (D258)
         float accentVelocity = 1.0f;    // an accented step's: the Accent knob's level
         std::uint32_t seed = 0x808u;
-        bool loop = true;               // false: the chain plays once through, then nothing (CoolSynth's D293)
+        bool loop = true;               // false: the chain plays once through, then nothing (CoolSynth's D297)
     };
 
     /** Where a beat position falls: for recording a hit onto the nearest step. */

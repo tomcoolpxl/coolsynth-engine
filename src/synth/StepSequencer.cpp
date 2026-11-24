@@ -137,7 +137,7 @@ namespace coolsynth::synth
 
         const int per = barsPerPattern();
         const auto cycle = static_cast<std::int64_t>(length) * per;
-        // The loop off (CoolSynth's D293): once through, then nothing.
+        // The loop off (CoolSynth's D297): once through, then nothing.
         if (! settings.loop && bar - start >= cycle)
             return { endedPattern, false, bar, bar };
         const auto m = floorMod(bar - start, cycle);

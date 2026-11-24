@@ -447,7 +447,7 @@ public:
 
         beginTest("with_the_loop_off_a_chain_plays_once_through_then_nothing");
         {
-            // CoolSynth's D293: the chain 0, 1 plays its two bars, then the sequencer is silent and says it has ended.
+            // CoolSynth's D297: the chain 0, 1 plays its two bars, then the sequencer is silent and says it has ended.
             auto bank = std::make_unique<SequencerBank>();
             lane(bank->pattern[0], 0, 36, { 0 }, false);
             lane(bank->pattern[1], 0, 38, { 0 }, false);
