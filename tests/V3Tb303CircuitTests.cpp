@@ -24,6 +24,9 @@ namespace
 {
     using coolsynth::synth::v3::Tb303Filter;
 
+    /** The voice's rate (D294, the user's choice: 96 kHz, the square's shaper at 8x of it). */
+    constexpr double voiceRate = 96000.0;
+
     struct Reference
     {
         std::map<juce::String, std::vector<double>> columns;
@@ -54,6 +57,19 @@ namespace
         }
         if (t1 > t0)
             r.rate = 1.0 / (t1 - t0);
+        // A render faster than the voice is read at the voice's samples: every second of a 192 kHz one at 96 kHz.
+        const int keep = static_cast<int>(std::lround(r.rate / voiceRate));
+        if (keep > 1)
+        {
+            for (auto& column : r.columns)
+            {
+                std::vector<double> kept;
+                for (std::size_t i = 0; i < column.second.size(); i += static_cast<std::size_t>(keep))
+                    kept.push_back(column.second[i]);
+                column.second = std::move(kept);
+            }
+            r.rate /= keep;
+        }
         return r;
     }
 
@@ -421,18 +437,18 @@ public:
             // Aliasing (D290), the user's bar at the 4x shaper: the square's strongest alias below 20 kHz at most -68 dB
             // re its fundamental at the top note, the saw's at most -85 dB.
             auto osc = std::make_unique<Tb303Oscillator>();
-            osc->prepare(192000.0);
+            osc->prepare(voiceRate);
             osc->setTrimmers(0.5687, 0.7389, 0.5, 1.0e-6);
             osc->settle(5.0);
-            std::vector<double> saw(192000 * 2), square(saw.size());
+            std::vector<double> saw(static_cast<std::size_t>(voiceRate) * 2), square(saw.size());
             for (std::size_t i = 0; i < saw.size(); ++i)
             {
                 saw[i] = osc->process(5.0);
                 square[i] = osc->squareVolts();
             }
             const auto crossings = sawCrossings(saw, saw.size() / 2);
-            const double f0 = 192000.0 * static_cast<double>(crossings.size() - 1) / (crossings.back() - crossings.front());
-            const double sawAlias = strongestAlias(saw, 192000.0, f0), squareAlias = strongestAlias(square, 192000.0, f0);
+            const double f0 = voiceRate * static_cast<double>(crossings.size() - 1) / (crossings.back() - crossings.front());
+            const double sawAlias = strongestAlias(saw, voiceRate, f0), squareAlias = strongestAlias(square, voiceRate, f0);
             logMessage("high C (" + juce::String(f0, 1) + " Hz): strongest alias below 20 kHz, saw " + juce::String(sawAlias, 1)
                        + " dB, square " + juce::String(squareAlias, 1) + " dB re the fundamental");
             expectLessThan(sawAlias, -85.0, "the saw's aliasing at high C");
@@ -443,7 +459,8 @@ public:
         {
             // tools/tb303/vca.cir (the envelope with the VCA's control around it): the gate from 10 ms to 72.5 ms, an
             // accent to 135 ms in the second case, a 440 Hz sine of 0.3 V as the filter's output (the RESONANCE wiper
-            // half of it); rendered at 96 kHz (48 kHz for the long decay), the model at 192 kHz read at the same times.
+            // half of it); rendered at 96 kHz (48 kHz for the long decay), the model at the voice's rate read at the
+            // same times.
             struct AmpCase
             {
                 const char* file;
@@ -458,7 +475,7 @@ public:
             };
             using coolsynth::synth::v3::Tb303Envelope;
             using coolsynth::synth::v3::Tb303Vca;
-            constexpr double rate = 192000.0, gateOn = 0.010, gateOff = 0.0725, accentOff = 0.135;
+            const double rate = voiceRate; constexpr double gateOn = 0.010, gateOff = 0.0725, accentOff = 0.135;
             for (const auto& c : cases)
             {
                 const auto file = referenceFolder().getChildFile(c.file);

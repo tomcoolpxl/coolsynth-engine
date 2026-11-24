@@ -48,7 +48,9 @@ namespace coolsynth::synth::v3
         static constexpr double top = 11.107, deadTime = 1.0e-6;    // where the thyristor leaves C33, and after how long
         static constexpr double jfetBeta = 1.0e-3, jfetPinch = -1.0, jfetLambda = 2.0e-3, r105 = 10.0e3;
         static constexpr double opAmpBandwidth = 1.0e6;              // the AN6562 (an LM358 in effect)
-        static constexpr int defaultShaperFactor = 4; // the user's choice (D290): the square's aliases 72 to 86 dB down
+        // The square's shaper near 768 kHz whatever the voice's rate (D290, D294: its aliases, 72 to 86 dB down, depend
+        // on the shaper's own rate alone): 8 times a 96 kHz voice, 4 times a 192 kHz one.
+        static constexpr double shaperRate = 768000.0;
 
         Tb303Oscillator()
         {
@@ -58,12 +60,19 @@ namespace coolsynth::synth::v3
             buildShaper();
         }
 
-        /** How many times faster than the voice the square's shaper runs (1, 2, 4 or 8); before prepare. */
-        void setShaperOversampling(int factor) noexcept { shaperFactor = std::clamp(factor, 1, maxFactor); }
+        /** How many times faster than the voice the square's shaper runs (1 to 8), in place of shaperRate's; before
+            prepare. */
+        void setShaperOversampling(int factor) noexcept
+        {
+            shaperFactor = std::clamp(factor, 1, maxFactor);
+            factorChosen = true;
+        }
 
         void prepare(double rate) noexcept
         {
             sampleRate = rate;
+            if (! factorChosen)
+                shaperFactor = std::clamp(static_cast<int>(std::lround(shaperRate / rate)), 1, maxFactor);
             pitch.setSampleRate(rate);
             shaper.setSampleRate(rate * shaperFactor);
             designDecimator();
@@ -435,7 +444,8 @@ namespace coolsynth::synth::v3
         bool sliding = false;
         std::array<double, 8> rawSaw {}, rawSquare {}, fixSaw {}, fixSquare {};
         unsigned int cursor = 0;
-        int shaperFactor = defaultShaperFactor, taps = 0, historyAt = 0;
+        int shaperFactor = 8, taps = 0, historyAt = 0;
+        bool factorChosen = false;
         std::array<double, maxTaps> kernel {}, historySaw {}, historySquare {};
         int inSupply = 0, inReference = 0, inLadder = 0, inCollector = 0, rS8 = 0, rS10 = 0;
         int rTm4a = 0, rTm4b = 0, rTm5 = 0, rTuneA = 0, rTuneB = 0, pCv = 0, pCollector = 0;

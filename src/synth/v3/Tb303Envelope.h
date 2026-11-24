@@ -21,9 +21,10 @@
                     R123), which Q32 empties at each trigger (D36 from Q38's collector, R134, C41); pin 1 as the
                     chip's Q1A, a diode-wired transistor over 500 Ohm (with Q1B's base current: IS (1 + 2 / hFE))
 
-    Slow, so it runs at a quarter of the voice's rate (its fastest part, C62's charge through R152, is 100 us), its
-    outputs interpolated linearly to the voice's samples (some 60 us late at the attack). Its own Jacobian kept between
-    steps (the chord method, D281). The NPNs that run at nanoamps (Q41, Q40, Q32) carry Gummel-Poon's base
+    Slow, so it runs near 48 kHz, half of the voice's 96 kHz (D294; its fastest part, C62's charge through R152, is
+    100 us), its outputs interpolated linearly to the voice's samples (some 60 us late at the attack). Its own
+    Jacobian kept between steps (the chord method, D281). The NPNs that run at nanoamps (Q41, Q40, Q32) carry
+    Gummel-Poon's base
     recombination (ISE 6.7 fA, NE 1.26) as a diode across their base and emitter: without it C41 held Q32 on after a
     trigger and C42 refilled 13 % slow. Leaks of 1 GOhm, as SPICE's GMIN, on the nodes only junctions leave.
     Outputs: the envelope (ENV MOD's top), the ACCENT knob's wiper, GATE, and pin 1's voltage (Q1B's base: the VCA).
@@ -43,7 +44,7 @@ namespace coolsynth::synth::v3
         static constexpr double npnRecombination = 6.734e-15, npnRecombinationEmission = 1.259; // QEM's ISE, NE
         static constexpr double jfetBeta = 0.89e-3, jfetPinch = -1.5, jfetLambda = 2.0e-3; // Q39, the 2SK30(Y)
         static constexpr double chipSaturation = 1.0e-15, chipBetaF = 150.0;               // the BA662's NPNs
-        static constexpr int rateDivider = 4;
+        static constexpr double controlRate = 48000.0; // near which it runs: a quarter of 192 kHz, half of 96 kHz
 
         Tb303Envelope()
         {
@@ -58,6 +59,7 @@ namespace coolsynth::synth::v3
         void prepare(double rate) noexcept
         {
             sampleRate = rate;
+            rateDivider = std::max(1, static_cast<int>(std::lround(rate / controlRate)));
             circuit.setSampleRate(rate / rateDivider);
         }
 
@@ -111,7 +113,7 @@ namespace coolsynth::synth::v3
             }
             ++phase;
             // The outputs a quarter step late, between the last two solves.
-            const double w = static_cast<double>(phase) / rateDivider;
+            const double w = static_cast<double>(phase) / static_cast<double>(rateDivider);
             for (int k = 0; k < outputs; ++k)
                 value[k] = before[k] + w * (now[k] - before[k]);
         }
@@ -254,7 +256,7 @@ namespace coolsynth::synth::v3
 
         double sampleRate = 192000.0, gateVolts = 0.0;
         bool accented = false;
-        int phase = rateDivider;
+        int rateDivider = 4, phase = 4;
         double now[outputs] {}, before[outputs] {}, value[outputs] {};
         int inSupply = 0, inReference = 0, inGate = 0, inVq9 = 0;
         int rDecay = 0, sDecayShort = 0, sAccentPass = 0, rAccentTop = 0, rAccentBottom = 0;
