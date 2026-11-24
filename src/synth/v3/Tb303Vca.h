@@ -42,6 +42,8 @@ namespace coolsynth::synth::v3
         {
             chip.setNewtonLimit(40);
             buffer.setNewtonLimit(40);
+            chip.setNewtonTolerance(Tb303Filter::newtonTolerance);
+            buffer.setNewtonTolerance(Tb303Filter::newtonTolerance);
             chip.setJacobianReuse(true);
             buffer.setJacobianReuse(true);
             buildChip();

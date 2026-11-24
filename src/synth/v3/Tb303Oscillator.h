@@ -57,6 +57,8 @@ namespace coolsynth::synth::v3
         {
             pitch.setNewtonLimit(40);
             shaper.setNewtonLimit(40);
+            pitch.setNewtonTolerance(Tb303Filter::newtonTolerance);
+            shaper.setNewtonTolerance(Tb303Filter::newtonTolerance);
             buildPitch();
             buildShaper();
         }

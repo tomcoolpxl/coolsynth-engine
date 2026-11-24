@@ -58,6 +58,7 @@ namespace coolsynth::synth::v3
         explicit Tb303Envelope(bool devilFish = false) : fish(devilFish)
         {
             circuit.setNewtonLimit(40);
+            circuit.setNewtonTolerance(Tb303Filter::newtonTolerance);
             circuit.setJacobianReuse(true);
             build();
         }

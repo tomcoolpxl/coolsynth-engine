@@ -50,10 +50,16 @@ namespace coolsynth::synth::v3
             the whole voice (D295); off, the wiper as vcf.cir has it alone. devilFish: a current into Q10's base, the
             control's summing node, for the Devil Fish's Filter Tracking and Filter FM (CoolSynth's D309); off, the
             circuit is the stock one, part for part. */
+        /** Where every TB-303 circuit's solve ends (the user's choice, CoolSynth's D345): 10 nV, not the solver's 100
+            nV. Against the voice solved to 10 pV: -128.5 dB rms, the worst sample -96 dB; at 100 nV the oscillator's
+            pitch ran some 0.0005 cents off and drifted from it (-90.5 dB rms, the worst sample -55.6 dB). */
+        static constexpr double newtonTolerance = 1.0e-8;
+
         explicit Tb303Filter(bool loadedByVca = false, bool devilFish = false)
         {
             converter.setNewtonLimit(40);
             loop.setNewtonLimit(40);
+            setNewtonTolerance(newtonTolerance);
             setJacobianReuse(true);
             buildConverter();
             buildLoop();

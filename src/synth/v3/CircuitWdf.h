@@ -426,6 +426,15 @@ namespace coolsynth::synth::v3::wdf
             reuseJacobian = on;
             haveFactors = false;
         }
+        /** The chord method's kept Jacobian as its inverse (worked out from the factors when they are made) in place
+            of the factors themselves: each step one product instead of two triangular solves, whose additions each
+            wait on the one before (CoolSynth's D345). On by default: as close to a circuit solved to 10 pV as the
+            factors (the TB-303 voice -117.4 dB rms against -117.5), not the same bits; a 10 ms block 15 % cheaper. */
+        void setChordInverse(bool on) noexcept
+        {
+            chordInverse = on;
+            haveFactors = false;
+        }
         /** Since the circuit was built: the steps that used kept factors and those that factored afresh. */
         [[nodiscard]] long chordStepCount() const noexcept { return chordSteps; }
         [[nodiscard]] long freshStepCount() const noexcept { return freshSteps; }
@@ -1197,10 +1206,35 @@ namespace coolsynth::synth::v3::wdf
                     to[c] = from[c];
             }
             haveFactors = true;
+            inverseReady = false;
+            factorUses = 0;
         }
 
-        /** delta = J^-1 residual with the kept factors. */
-        void solveWithFactors(const double* residual, double* delta) const noexcept
+        /** delta = J^-1 residual with the kept factors; with setChordInverse, by their inverse once the factors have
+            lasted inverseAfter uses (at an attack they are made afresh nearly every sample, and an inverse made each
+            time cost more than it saved: the first block of a note 13.2 ms against 8.5). */
+        void solveWithFactors(const double* residual, double* delta) noexcept
+        {
+            if (chordInverse && ! inverseReady && ++factorUses >= inverseAfter)
+            {
+                const int m = nonlinearCount;
+                double unit[maxDevicePorts] {};
+                for (int k = 0; k < m; ++k) // the inverse's columns, each the factors' solve for a unit vector
+                {
+                    unit[k] = 1.0;
+                    luSolve(unit, inverseByColumn[static_cast<std::size_t>(k)].data());
+                    unit[k] = 0.0;
+                }
+                inverseReady = true;
+            }
+            if (inverseReady)
+                rowsTimes(inverseByColumn[0].data(), maxDevicePorts, nonlinearCount, nonlinearCount, residual, delta);
+            else
+                luSolve(residual, delta);
+        }
+
+        /** delta = J^-1 residual by the kept factors' two triangular solves. */
+        void luSolve(const double* residual, double* delta) const noexcept
         {
             const int m = nonlinearCount;
             const int* order = factorOrder.data();
@@ -1572,6 +1606,10 @@ namespace coolsynth::synth::v3::wdf
         bool overBuilt = false; // fitsItsLimits
         long chordSteps = 0, freshSteps = 0;
         std::array<std::array<double, maxDevicePorts>, maxDevicePorts> factors {};
+        std::array<std::array<double, maxDevicePorts>, maxDevicePorts> inverseByColumn {}; // setChordInverse
+        bool chordInverse = true, inverseReady = false; // the user's choice (D345); only the chord method uses it
+        int factorUses = 0;
+        static constexpr int inverseAfter = 32; // uses of the same factors before their inverse is made
         std::array<int, maxDevicePorts> factorOrder {};
         bool solved = true;
         bool wellPosed = true;
