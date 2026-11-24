@@ -8,6 +8,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include "CircuitWatch.h"
 #include "Module.h"
 #include "Tr808Cowbell.h"
 #include "Tr808Cymbal.h"
@@ -294,6 +295,15 @@ namespace coolsynth::synth::v3
             {
                 left[s] *= gainLeft;
                 right[s] *= gainRight;
+            }
+            // Each instrument's level, for a panel to show as it plays (CoolSynth's D313); nothing without a watch.
+            if (params.watch != nullptr)
+            {
+                static constexpr std::array<int, instrumentCount> lights { CircuitWatch::cowbell, CircuitWatch::cymbal, CircuitWatch::openHat, CircuitWatch::closedHat };
+                for (int k = 0; k < instrumentCount; ++k)
+                    if (running[static_cast<std::size_t>(k)])
+                        params.watch->raise(lights[static_cast<std::size_t>(k)], static_cast<float>(level[static_cast<std::size_t>(k)]));
+                params.watch->reported();
             }
         }
 

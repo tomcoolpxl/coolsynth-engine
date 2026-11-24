@@ -196,6 +196,7 @@ namespace coolsynth::synth::v3
         const GlobalFrame* frames = nullptr; // one per sub-block of the render call, or none
         int frameCount = 0;
         std::uint32_t* takeTurn = nullptr;   // the part's count of takes played: each part its own, no global (D162)
+        CircuitWatch* watch = nullptr;       // the app's watch on the 808's circuits, or none (CoolSynth's D313)
     };
 
     struct NoteStart

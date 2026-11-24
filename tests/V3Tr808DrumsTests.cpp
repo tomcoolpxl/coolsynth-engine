@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "synth/v3/CircuitWatch.h"
 #include "synth/v3/Part.h"
 #include "synth/v3/Tr808RimShot.h"
 #include "synth/v3/Tr808Tom.h"
@@ -384,6 +385,38 @@ namespace
         return out;
     }
 
+    /** As play, with a watch on the circuits (CoolSynth's D313): one light's level taken after every block. */
+    std::vector<float> playWatched(const PartSettings& settings, const std::vector<Hit>& hits, double seconds, CircuitWatch& watch,
+                                   int light, std::vector<float>& lightPerBlock, double rate = 48000.0)
+    {
+        constexpr int block = 256;
+        auto part = std::make_unique<Part>();
+        part->prepare(rate, block, 11);
+        part->setCircuitWatch(&watch);
+        const int blocks = static_cast<int>(seconds * rate) / block;
+        std::vector<float> out, left(block), right(block);
+        for (int b = 0; b < blocks; ++b)
+        {
+            std::vector<coolsynth::synth::EngineMidiEvent> events;
+            for (const auto& h : hits)
+                if (h.sample >= b * block && h.sample < (b + 1) * block)
+                {
+                    coolsynth::synth::EngineMidiEvent e;
+                    e.type = coolsynth::synth::EngineMidiEventType::noteOn;
+                    e.sampleOffset = h.sample - b * block;
+                    e.noteNumber = static_cast<std::uint8_t>(h.note);
+                    e.value = 1.0f;
+                    events.push_back(e);
+                }
+            std::fill(left.begin(), left.end(), 0.0f);
+            std::fill(right.begin(), right.end(), 0.0f);
+            part->render(left.data(), right.data(), block, events, settings, {});
+            out.insert(out.end(), left.begin(), left.end());
+            lightPerBlock.push_back(watch.take(light));
+        }
+        return out;
+    }
+
     float peakOf(const std::vector<float>& x, std::size_t from = 0, std::size_t to = static_cast<std::size_t>(-1))
     {
         float p = 0.0f;
@@ -453,6 +486,37 @@ public:
             for (std::size_t i = 0; i < later.size(); ++i)
                 worst = std::max(worst, std::abs(later[i] - bass[i] - tomLater[i]));
             expectLessThan(worst, 1.0e-4f * peakOf(later), "a hit while another rings adds to it");
+        }
+
+        beginTest("a_watch_follows_each_drum_and_changes_no_sound");
+        {
+            // CoolSynth's D313: the panel's lights follow the circuits as they play. The sound is the same, bit for bit,
+            // with a watch; the bass drum's light rises with its hit and goes out as it rings down; the others stay dark.
+            const auto plain = play(kitOf(), { { 0, 36 } }, 2.0);
+            CircuitWatch watch;
+            std::vector<float> light;
+            const auto watched = playWatched(kitOf(), { { 0, 36 } }, 2.0, watch, CircuitWatch::bassDrum, light);
+            expect(plain == watched, "the sound is the same with a watch");
+            const float top = *std::max_element(light.begin(), light.end());
+            expectGreaterThan(top, 0.05f, "the bass drum lights");
+            expectLessThan(light.back(), 0.01f * top, "and goes out as it rings down");
+            expectEquals(watch.take(CircuitWatch::lowTom), 0.0f, "the low tom stays dark");
+            expectGreaterThan(static_cast<int>(watch.reportCount()), 0);
+
+            // A longer Decay holds the light longer, as it holds the sound.
+            const auto longFor = [&](float decay)
+            {
+                auto s = kitOf();
+                s.voice.generators[0] = drumsOf({ { Tr808DrumsGenerator::bdDecay, decay } });
+                CircuitWatch w;
+                std::vector<float> l;
+                playWatched(s, { { 0, 36 } }, 2.0, w, CircuitWatch::bassDrum, l);
+                const float peak = *std::max_element(l.begin(), l.end());
+                return static_cast<int>(std::count_if(l.begin(), l.end(), [peak](float v) { return v > 0.1f * peak; }));
+            };
+            const int shortBlocks = longFor(0.1f), longBlocks = longFor(0.9f);
+            logMessage("blocks above a tenth of the peak: Decay 0.1 " + juce::String(shortBlocks) + ", Decay 0.9 " + juce::String(longBlocks));
+            expectGreaterThan(longBlocks, shortBlocks + 10, "a longer Decay keeps the light longer");
         }
 
         beginTest("note_offs_change_nothing");

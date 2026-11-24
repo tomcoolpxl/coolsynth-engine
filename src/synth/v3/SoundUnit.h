@@ -95,6 +95,13 @@ namespace coolsynth::synth::v3
 
         /** Message thread. Every buffer for blocks up to maxBlockSize; `seed` sets the voices' randomness apart. */
         void prepare(double sampleRate, int maxBlockSize, std::uint32_t seed);
+        /** Where the 808's generators report their instruments' levels, both layers (CoolSynth's D313). */
+        void setCircuitWatch(CircuitWatch* w) noexcept
+        {
+            for (auto& p : parts)
+                if (p != nullptr)
+                    p->setCircuitWatch(w);
+        }
         /** Silent and idle at once: voices, held keys, effect tails, the mix's and the master gain's ramps. */
         void panic() noexcept;
         /** Every random number of the sound back to where prepare left it, the beat count at 0: a defined start (D222). */

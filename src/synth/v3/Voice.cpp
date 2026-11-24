@@ -616,6 +616,7 @@ namespace coolsynth::synth::v3
             params.userSound = gs.userSound;
             params.live = i == liveSlot ? liveBuffer.get() : nullptr;
             params.takeTurn = globals.takeTurn;
+            params.watch = globals.watch;
 
             g.slot.setLink(params.combine != Combine::off ? previous : GeneratorLink {});
             g.slot.process(g.left.data(), g.right.data(), n, params);

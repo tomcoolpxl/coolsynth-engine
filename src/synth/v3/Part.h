@@ -114,6 +114,8 @@ namespace coolsynth::synth::v3
 
         /** Message thread. Allocates the voice bus for blocks up to maxBlockSize; longer blocks are split. */
         void prepare(double hostSampleRate, int maxBlockSize, std::uint32_t seed);
+        /** Where the 808's generators report their instruments' levels (CoolSynth's D313); null, none. */
+        void setCircuitWatch(CircuitWatch* w) noexcept { watch = w; }
 
         /** Panic: silence, empty note stack, controllers at rest. */
         void reset() noexcept;
@@ -252,6 +254,7 @@ namespace coolsynth::synth::v3
         Arpeggiator arpeggiator;
         VoiceGlobals globals;
         std::uint32_t takeTurn = 0; // the takes of a sampled instrument come round in turn, counted per part (D162 rule 3)
+        CircuitWatch* watch = nullptr; // the app's watch on the 808's circuits (D313)
         std::array<Lfo, globalLfoCount> globalLfos;
         std::vector<GlobalFrame> frames;
         LfoClock chunkClock {};

@@ -486,6 +486,7 @@ namespace coolsynth::synth::v3
         globals.frames = frames.data();
         globals.frameCount = frameCount;
         globals.takeTurn = &takeTurn;
+        globals.watch = watch;
 
         for (std::size_t i = 0; i < voices.size(); ++i)
         {

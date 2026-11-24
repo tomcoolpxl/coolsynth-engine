@@ -71,6 +71,7 @@ namespace coolsynth::synth::v3
     enum class Combine : int { off = 0, sync, ring, fm, am, live };
 
     class LiveBuffer; // LiveBuffer.h: a voice's recording of the generator before a live Grain slot
+    class CircuitWatch; // CircuitWatch.h: the 808's instruments' levels, for a panel (CoolSynth's D313)
 
     /**
         What a generator hands the next one for its combine mode, in its own output time.
@@ -97,6 +98,7 @@ namespace coolsynth::synth::v3
         int userSound = -1;               // generators: a handle of the user's own sound (UserLibrary), or -1
         LiveBuffer* live = nullptr;       // a Grain slot with combine Live: the voice's recording to write and read
         std::uint32_t* takeTurn = nullptr; // a sampled instrument's takes come round in turn: the part's own count (D162 rule 3)
+        CircuitWatch* watch = nullptr;     // the 808's generators: where their instruments' levels go; null, none (D313)
     };
 
     /** Arena of floats, sized once off the audio thread; modules take spans from it in prepare(). */

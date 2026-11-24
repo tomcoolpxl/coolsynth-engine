@@ -54,6 +54,15 @@ namespace coolsynth::synth::v3
         [[nodiscard]] const EngineShape& shape() const noexcept { return engineShape; }
 
         void prepare(double sampleRate, int maxBlockSize, int outputChannels);
+        /** Where the 808's generators report their instruments' levels as they play, for a panel to show (CoolSynth's
+            D313, CircuitWatch.h); null, the default, for none. Set it before playing; the watch outlives the engine's
+            use of it. */
+        void setCircuitWatch(CircuitWatch* w) noexcept
+        {
+            for (auto& u : units)
+                if (u != nullptr)
+                    u->setCircuitWatch(w);
+        }
         void releaseResources() noexcept {}
         void render(juce::AudioBuffer<float>& buffer,
                     std::span<const EngineMidiEvent> events,
