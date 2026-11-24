@@ -187,6 +187,10 @@ namespace coolsynth::synth::v3
             const float amount = juce::jlimit(0.0f, 1.0f, params.combineAmount);
             const bool useRing = params.combine == Combine::ring && input.signal != nullptr;
             const bool useAm = params.combine == Combine::am && input.signal != nullptr;
+            // Each instrument's light; and those heard (the 808's WAV export, CoolSynth's D331): all play as ever, only
+            // these sound.
+            static constexpr std::array<int, instrumentCount> lights { CircuitWatch::snare, CircuitWatch::clap };
+            const std::uint32_t heard = params.watch != nullptr ? params.watch->heardMask() : CircuitWatch::allHeard;
 
             for (int s = 0; s < numSamples; ++s)
             {
@@ -265,7 +269,8 @@ namespace coolsynth::synth::v3
                     sinceHit[i] += 1.0;
                     if (level[i] <= silentLevel && sinceHit[i] > settleSamples)
                         running[i] = false; // rung down: it rests until its next hit
-                    sum += y;
+                    if (((heard >> lights[i]) & 1u) != 0u)
+                        sum += y;
                 }
 
                 // Two samples late, as every generator.
@@ -294,7 +299,6 @@ namespace coolsynth::synth::v3
             // Each instrument's level, for a panel to show as it plays (CoolSynth's D313); nothing without a watch.
             if (params.watch != nullptr)
             {
-                static constexpr std::array<int, instrumentCount> lights { CircuitWatch::snare, CircuitWatch::clap };
                 for (int k = 0; k < instrumentCount; ++k)
                     if (running[static_cast<std::size_t>(k)])
                         params.watch->raise(lights[static_cast<std::size_t>(k)], static_cast<float>(level[static_cast<std::size_t>(k)]));

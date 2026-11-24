@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <string_view>
 
 /*
@@ -46,6 +47,13 @@ namespace coolsynth::synth::v3
         {
             return light < 0 || light >= lightCount ? 0.0f : lights[static_cast<std::size_t>(light)].exchange(0.0f, std::memory_order_relaxed);
         }
+
+        // ---- The instruments heard (the 808's WAV export, CoolSynth's D331) ---------------------------------------
+        // A drum's own file: every instrument plays as ever (it runs, rings and rests as in the mix, and the voice lasts
+        // as long), but only those heard go into their generators' outputs. All heard by default.
+        static constexpr std::uint32_t allHeard = (1u << lightCount) - 1u;
+        void hearOnly(std::uint32_t lightMask) noexcept { heard.store(lightMask, std::memory_order_relaxed); }
+        [[nodiscard]] std::uint32_t heardMask() const noexcept { return heard.load(std::memory_order_relaxed); }
 
         /** How many times a generator has reported: the interface can tell a running engine from a stopped one. */
         void reported() noexcept { reports.fetch_add(1, std::memory_order_relaxed); }
@@ -160,6 +168,7 @@ namespace coolsynth::synth::v3
         std::array<std::atomic<unsigned int>, lightCount> boardHits {};
         std::array<std::array<std::atomic<float>, boardSlots>, lightCount> board {}, boardRest {};
         std::atomic<unsigned int> reports { 0 };
+        std::atomic<std::uint32_t> heard { allHeard };
         std::atomic<int> watched { -1 }, frames { 0 };
         std::atomic<unsigned int> hits { 0 };
         std::atomic<bool> held { false };
