@@ -22,6 +22,7 @@ namespace coolsynth::synth::v3
     void Voice::prepare(double newSampleRate, std::uint32_t seed)
     {
         sampleRate = static_cast<float>(std::max(1000.0, newSampleRate));
+        tapMemory.assign(static_cast<std::size_t>(2 * CircuitWatch::lightCount * maxSubBlock), 0.0f);
         if (liveBuffer == nullptr)
             liveBuffer = std::make_unique<LiveBuffer>();
         liveBuffer->prepare(newSampleRate);
@@ -438,7 +439,8 @@ namespace coolsynth::synth::v3
         }
     }
 
-    void Voice::render(float* left, float* right, int numSamples, const VoiceSettings& settings, const VoiceGlobals& globals) noexcept
+    void Voice::render(float* left, float* right, int numSamples, const VoiceSettings& settings, const VoiceGlobals& globals,
+                       float* const* taps) noexcept
     {
         if (! isActive())
             return;
@@ -454,7 +456,7 @@ namespace coolsynth::synth::v3
             if (stealRemaining > 0)
                 n = std::min(n, stealRemaining);
 
-            renderSubBlock(left + done, right + done, done, n, settings, globals);
+            renderSubBlock(left + done, right + done, done, n, settings, globals, taps);
             done += n;
 
             if (releaseWaiting && std::none_of(generators.begin(), generators.end(), [](const auto& g) { return g.slot.holdsRelease(); }))
@@ -515,7 +517,8 @@ namespace coolsynth::synth::v3
         return true;
     }
 
-    void Voice::renderSubBlock(float* left, float* right, int offset, int n, const VoiceSettings& settings, const VoiceGlobals& globals) noexcept
+    void Voice::renderSubBlock(float* left, float* right, int offset, int n, const VoiceSettings& settings, const VoiceGlobals& globals,
+                               float* const* taps) noexcept
     {
         if (lfoRestartPending)
         {
@@ -595,6 +598,29 @@ namespace coolsynth::synth::v3
         std::fill_n(mixL, n, 0.0f);
         std::fill_n(mixR, n, 0.0f);
 
+        // The drums on their own outputs (CoolSynth's D343), the lights whose taps are given (`taps` from the render
+        // call's start, so `offset` on): a scratch per light for each generator in turn, and the voice's sum of them.
+        constexpr int lightCount = CircuitWatch::lightCount;
+        std::array<float*, lightCount> scratch;
+        std::array<float*, lightCount> voiceTaps;
+        std::uint32_t separate = 0;
+        if (taps != nullptr)
+        {
+            scratch.fill(nullptr);
+            for (int l = 0; l < lightCount; ++l)
+            {
+                const auto i = static_cast<std::size_t>(l);
+                voiceTaps[i] = tapMemory.data() + static_cast<std::size_t>((lightCount + l) * maxSubBlock);
+                if (taps[i] == nullptr)
+                    continue;
+                separate |= 1u << l;
+                scratch[i] = tapMemory.data() + static_cast<std::size_t>(l * maxSubBlock);
+                std::fill_n(voiceTaps[i], n, 0.0f);
+            }
+            if (separate == 0u)
+                taps = nullptr;
+        }
+
         // The first Grain slot set to Live gets the voice's recording of the generator before it.
         std::size_t liveSlot = generators.size();
         for (std::size_t i = 1; i < generators.size() && liveSlot == generators.size(); ++i)
@@ -617,6 +643,14 @@ namespace coolsynth::synth::v3
             params.live = i == liveSlot ? liveBuffer.get() : nullptr;
             params.takeTurn = globals.takeTurn;
             params.watch = globals.watch;
+            if (taps != nullptr)
+            {
+                // only the 808's generators write their lights: the rest of the scratch must read 0
+                for (int l = 0; l < lightCount; ++l)
+                    if (((separate >> l) & 1u) != 0u)
+                        std::fill_n(scratch[static_cast<std::size_t>(l)], n, 0.0f);
+                params.taps = scratch.data();
+            }
 
             g.slot.setLink(params.combine != Combine::off ? previous : GeneratorLink {});
             g.slot.process(g.left.data(), g.right.data(), n, params);
@@ -638,7 +672,24 @@ namespace coolsynth::synth::v3
                 mixL[s] += gl[s] * level;
                 mixR[s] += gr[s] * level;
             }
+            // Each tap at the same level, sample for sample.
+            for (int l = 0; taps != nullptr && l < lightCount; ++l)
+            {
+                if (((separate >> l) & 1u) == 0u)
+                    continue;
+                const float* in = scratch[static_cast<std::size_t>(l)];
+                float* out = voiceTaps[static_cast<std::size_t>(l)];
+                float tapLevel = from;
+                for (int s = 0; s < n; ++s)
+                {
+                    tapLevel += step;
+                    out[s] += in[s] * tapLevel;
+                }
+            }
         }
+
+        // The processors run on the mix alone: the taps pass them by. The 808's kit runs none, so its drums sound on
+        // their own outputs as in the mix.
 
         for (std::size_t j = 0; j < processors.size(); ++j)
         {
@@ -665,16 +716,35 @@ namespace coolsynth::synth::v3
         const float vcaStep = (vcaTarget - vcaFrom) / static_cast<float>(n);
 
         const float fadeScale = 1.0f / static_cast<float>(stealTotal);
-        float peak = 0.0f; // this voice's own output, for ending a released one early (TODO 10)
-        for (int s = 0; s < n; ++s)
+        const auto gainAt = [&](int s)
         {
             float gain = amp[s] * note.gain * (vcaFrom + vcaStep * static_cast<float>(s + 1));
             if (stealRemaining > 0)
                 gain *= static_cast<float>(stealRemaining - 1 - s) * fadeScale;
+            return gain;
+        };
+        float peak = 0.0f; // this voice's own output, for ending a released one early (TODO 10)
+        for (int s = 0; s < n; ++s)
+        {
+            const float gain = gainAt(s);
             const float outLeft = mixL[s] * gain, outRight = mixR[s] * gain;
             left[s] += outLeft;
             right[s] += outRight;
             peak = std::max(peak, std::max(std::abs(outLeft), std::abs(outRight)));
+        }
+        // The taps at the same gain into the part's (D343); they count as the voice's output too.
+        for (int l = 0; taps != nullptr && l < lightCount; ++l)
+        {
+            if (((separate >> l) & 1u) == 0u)
+                continue;
+            const float* in = voiceTaps[static_cast<std::size_t>(l)];
+            float* out = taps[l] + offset;
+            for (int s = 0; s < n; ++s)
+            {
+                const float tap = in[s] * gainAt(s);
+                out[s] += tap;
+                peak = std::max(peak, std::abs(tap));
+            }
         }
         lastSubBlockPeak = peak;
     }

@@ -55,6 +55,12 @@ namespace coolsynth::synth::v3
         void hearOnly(std::uint32_t lightMask) noexcept { heard.store(lightMask, std::memory_order_relaxed); }
         [[nodiscard]] std::uint32_t heardMask() const noexcept { return heard.load(std::memory_order_relaxed); }
 
+        // ---- The drums on their own outputs (the 808's VST3, CoolSynth's D343) -------------------------------------
+        // A separated drum leaves the main mix and plays only on its own mono output, as it would have sounded in the
+        // mix (EngineV3::render's tapOut). None by default.
+        void setSeparate(std::uint32_t lightMask) noexcept { separate.store(lightMask, std::memory_order_relaxed); }
+        [[nodiscard]] std::uint32_t separateMask() const noexcept { return separate.load(std::memory_order_relaxed); }
+
         // ---- The 808 Metal's Lighter accuracy (CoolSynth's D339) ---------------------------------------------------
         // On: its five swing VCAs run only while their drum sounds, and its circuits' Newton ends at 10 uV, not 100 nV.
         void setLighter(bool on) noexcept { lighterOn.store(on, std::memory_order_relaxed); }
@@ -174,6 +180,7 @@ namespace coolsynth::synth::v3
         std::array<std::array<std::atomic<float>, boardSlots>, lightCount> board {}, boardRest {};
         std::atomic<unsigned int> reports { 0 };
         std::atomic<std::uint32_t> heard { allHeard };
+        std::atomic<std::uint32_t> separate { 0 };
         std::atomic<bool> lighterOn { false };
         std::atomic<int> watched { -1 }, frames { 0 };
         std::atomic<unsigned int> hits { 0 };
@@ -322,5 +329,79 @@ namespace coolsynth::synth::v3
                 out[k] = i >= 0 ? all[static_cast<std::size_t>(i)] : 0.0f;
             }
         }
+    };
+
+    /**
+        A generator's instruments on their own outputs (CoolSynth's D343): a separated instrument leaves the
+        generator's sum and goes, two samples late as the sum does, to its light's tap (SlotParams::taps; a null tap,
+        or none, is a light not separated). Each instrument's line is kept across blocks: one separated anew starts
+        empty, as its last two samples are still in the sum's line, and one joined back hands its last two to the
+        sum's, so not a sample is lost or played twice. Without taps it costs a check a block.
+    */
+    template <int count>
+    class OwnOutputs final
+    {
+    public:
+        /** At the start of a block: the instruments separated now, a bit each by the generator's own numbers. */
+        std::uint32_t begin(float* const* taps, const std::array<int, count>& lights, std::array<float, 4>& sumLine, unsigned int cursor) noexcept
+        {
+            std::uint32_t now = 0;
+            if (taps != nullptr)
+                for (int k = 0; k < count; ++k)
+                    if (taps[lights[static_cast<std::size_t>(k)]] != nullptr)
+                        now |= 1u << k;
+            if (now == separated)
+                return now;
+            for (int k = 0; k < count; ++k)
+            {
+                const std::uint32_t bit = 1u << k;
+                auto& line = lines[static_cast<std::size_t>(k)];
+                if ((now & bit) != 0u && (separated & bit) == 0u)
+                    line.fill(0.0f);
+                else if ((now & bit) == 0u && (separated & bit) != 0u)
+                    for (unsigned int ahead = 2u; ahead < 4u; ++ahead) // the two samples still on their way
+                        sumLine[(cursor + ahead) & 3u] += line[(cursor + ahead) & 3u];
+            }
+            separated = now;
+            return now;
+        }
+        /** A separated instrument's sample, once it sounds (its tap has 0 otherwise). */
+        void put(int instrument, double y) noexcept { in[static_cast<std::size_t>(instrument)] = static_cast<float>(y); }
+        /** After every instrument's sample, at the sum line's cursor: each line on by one. What comes out, summed. */
+        float step(unsigned int cursor) noexcept
+        {
+            float total = 0.0f;
+            for (int k = 0; k < count; ++k)
+            {
+                if (((separated >> k) & 1u) == 0u)
+                    continue;
+                const auto i = static_cast<std::size_t>(k);
+                lines[i][cursor & 3u] = in[i];
+                in[i] = 0.0f;
+                out[i] = lines[i][(cursor + 2u) & 3u];
+                total += out[i];
+            }
+            return total;
+        }
+        /** Each separated instrument's sample `s`, times `gain`, onto its tap. */
+        void write(float* const* taps, const std::array<int, count>& lights, int s, float gain) const noexcept
+        {
+            for (int k = 0; k < count; ++k)
+                if (((separated >> k) & 1u) != 0u)
+                    taps[lights[static_cast<std::size_t>(k)]][s] = out[static_cast<std::size_t>(k)] * gain;
+        }
+        void reset() noexcept
+        {
+            separated = 0;
+            for (auto& line : lines)
+                line.fill(0.0f);
+            in.fill(0.0f);
+            out.fill(0.0f);
+        }
+
+    private:
+        std::uint32_t separated = 0;
+        std::array<std::array<float, 4>, count> lines {};
+        std::array<float, count> in {}, out {};
     };
 }

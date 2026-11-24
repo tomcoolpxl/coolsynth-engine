@@ -112,11 +112,14 @@ namespace coolsynth::synth::v3
         /**
             One block of at most the prepared size, with its events, played with `settings`, added into the sum: after
             the unit's own master gain, times a fade that moves from `fadeFrom` to `fadeTo` across the block. The
-            stage times go into `slowest`.
+            stage times go into `slowest`. `tapOut`, one per CircuitWatch light (null where a light is in the mix;
+            null for none): layer A's drums on their own outputs (CoolSynth's D343), written (not added) at every gain
+            the mix gives them, sample for sample. They pass the inserts and the master slots by: the 808's shape has
+            none.
         */
         void render(float* sumLeft, float* sumRight, int numSamples, std::span<const EngineMidiEvent> events,
                     const EngineSettings& settings, const EngineTransportInfo& transport,
-                    float fadeFrom, float fadeTo, StageTiming& slowest) noexcept;
+                    float fadeFrom, float fadeTo, StageTiming& slowest, float* const* tapOut = nullptr) noexcept;
 
         /** A voice is still playing. */
         [[nodiscard]] bool isSounding() const noexcept { return parts[0]->isSounding() || (parts[1] != nullptr && parts[1]->isSounding()); }

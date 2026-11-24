@@ -137,6 +137,7 @@ namespace coolsynth::synth::v3
             noiseLast = 0.0;
             ring.fill(0.0f);
             cursor = 0;
+            ownOutputs.reset();
             std::fill(signalTrack.begin(), signalTrack.end(), 0.0f);
             input = {};
             applied.fill(-1.0f);
@@ -191,6 +192,11 @@ namespace coolsynth::synth::v3
             // these sound.
             static constexpr std::array<int, instrumentCount> lights { CircuitWatch::snare, CircuitWatch::clap };
             const std::uint32_t heard = params.watch != nullptr ? params.watch->heardMask() : CircuitWatch::allHeard;
+            // Those on their own outputs (CoolSynth's D343), out of the sum; mono, at the pan's two gains' mean.
+            const std::uint32_t separate = ownOutputs.begin(params.taps, lights, ring, cursor);
+            const float panAngle = (juce::jlimit(-1.0f, 1.0f, params.pan) + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
+            const float gainLeft = std::cos(panAngle), gainRight = std::sin(panAngle);
+            const float gainMono = 0.5f * (gainLeft + gainRight);
 
             for (int s = 0; s < numSamples; ++s)
             {
@@ -269,7 +275,11 @@ namespace coolsynth::synth::v3
                     sinceHit[i] += 1.0;
                     if (level[i] <= silentLevel && sinceHit[i] > settleSamples)
                         running[i] = false; // rung down: it rests until its next hit
-                    if (((heard >> lights[i]) & 1u) != 0u)
+                    if (((heard >> lights[i]) & 1u) == 0u)
+                        continue;
+                    if (((separate >> k) & 1u) != 0u)
+                        ownOutputs.put(k, y);
+                    else
                         sum += y;
                 }
 
@@ -277,20 +287,27 @@ namespace coolsynth::synth::v3
                 const unsigned int now = cursor & 3u;
                 ring[now] = static_cast<float>(sum);
                 float out = ring[(cursor + 2u) & 3u];
+                const float apart = separate != 0u ? ownOutputs.step(cursor) : 0.0f;
                 ++cursor;
 
+                float shape = 1.0f;
                 if (useRing || useAm)
                 {
                     const float m = input.signal[s];
-                    out *= useRing ? 1.0f - amount + amount * m : 1.0f - 0.5f * amount * (1.0f - m);
+                    shape = useRing ? 1.0f - amount + amount * m : 1.0f - 0.5f * amount * (1.0f - m);
+                    out *= shape;
                 }
                 left[s] = out;
                 right[s] = out;
                 signalTrack[static_cast<std::size_t>(s)] = out;
+                if (separate != 0u)
+                {
+                    // the next slot's link is the whole generator, the separated instruments too
+                    signalTrack[static_cast<std::size_t>(s)] = out + apart * shape;
+                    ownOutputs.write(params.taps, lights, s, shape * gainMono);
+                }
             }
 
-            const float panAngle = (juce::jlimit(-1.0f, 1.0f, params.pan) + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
-            const float gainLeft = std::cos(panAngle), gainRight = std::sin(panAngle);
             for (int s = 0; s < numSamples; ++s)
             {
                 left[s] *= gainLeft;
@@ -409,6 +426,7 @@ namespace coolsynth::synth::v3
         double noiseSigma = 0.0, noiseB = 0.0, noiseA = 0.0, noiseState = 0.0, noiseLast = 0.0;
         std::array<float, 4> ring {};
         unsigned int cursor = 0;
+        OwnOutputs<instrumentCount> ownOutputs; // the instruments on their own outputs (CoolSynth's D343)
         std::uint32_t rng = 1, rngStart = 1;
         std::span<float> signalTrack;
         GeneratorLink input {};

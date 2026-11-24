@@ -129,13 +129,16 @@ namespace coolsynth::synth::v3
         [[nodiscard]] int quietestReleased(float& level) const noexcept;
         void fadeOutVoice(int index) noexcept;
 
-        /** Writes (not adds) the part's host-rate output. Event offsets are relative to this call. */
+        /** Writes (not adds) the part's host-rate output. Event offsets are relative to this call. `tapOut`, one per
+            CircuitWatch light (null where a light is in the mix; null for none): the 808's drums on their own
+            outputs, written too, at the host's rate (CoolSynth's D343). */
         void render(float* left,
                     float* right,
                     int numSamples,
                     std::span<const EngineMidiEvent> events,
                     const PartSettings& settings,
-                    const EngineTransportInfo& transport) noexcept;
+                    const EngineTransportInfo& transport,
+                    float* const* tapOut = nullptr) noexcept;
 
         /** True once after an All Sound Off, so the engine clears its effect tails too. */
         [[nodiscard]] bool consumeSoundOff() noexcept
@@ -201,7 +204,7 @@ namespace coolsynth::synth::v3
         static constexpr int maxHeldNotes = 32;
 
         void renderChunk(float* left, float* right, int n, std::span<const EngineMidiEvent> events, int offsetBase,
-                         const PartSettings& settings, const EngineTransportInfo& transport) noexcept;
+                         const PartSettings& settings, const EngineTransportInfo& transport, float* const* tapOut) noexcept;
         void renderSpan(int start, int count, const PartSettings& settings) noexcept;
         void handleEvent(const EngineMidiEvent& event, const PartSettings& settings) noexcept;
         void updateGlobals(const PartSettings& settings) noexcept;
@@ -250,6 +253,11 @@ namespace coolsynth::synth::v3
 
         std::vector<float> busLeft, busRight;
         HalfBandDecimator2x decimatorLeft, decimatorRight;
+        // The drums on their own outputs (CoolSynth's D343): a bus per light at the voices' rate, its own decimator,
+        // and the lights given a tap in this render call (a bit each; only those are worked on).
+        std::vector<float> tapBus;
+        std::array<HalfBandDecimator2x, CircuitWatch::lightCount> tapDecimators;
+        std::uint32_t tapsLive = 0;
         ChordMemory chordMemory;
         std::vector<EngineMidiEvent> chordEvents;     // one chunk's events after chord memory
         std::vector<std::uint16_t> chordInputsBefore; // per chord event: the played events read by then

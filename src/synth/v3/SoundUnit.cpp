@@ -339,8 +339,14 @@ namespace coolsynth::synth::v3
 
     void SoundUnit::render(float* sumLeft, float* sumRight, int n, std::span<const EngineMidiEvent> events,
                            const EngineSettings& settings, const EngineTransportInfo& transport,
-                           float fadeFrom, float fadeTo, StageTiming& slowest) noexcept
+                           float fadeFrom, float fadeTo, StageTiming& slowest, float* const* tapOut) noexcept
     {
+        // The drums on their own outputs (CoolSynth's D343): layer A's lights given a tap.
+        std::uint32_t separate = 0;
+        if (tapOut != nullptr)
+            for (int l = 0; l < CircuitWatch::lightCount; ++l)
+                if (tapOut[l] != nullptr)
+                    separate |= 1u << l;
         // A layer with every slot Off is left out (D190): it costs nothing, and the other has every key.
         // A shape without layer B never plays it (D270).
         const std::array<bool, partCount> active { ! layerEmpty(settings.parts[0]),
@@ -382,9 +388,15 @@ namespace coolsynth::synth::v3
             patch.tuneSemitones = settings.mix[p].fineCents * 0.01f;
 
             const StageClock stageClock { slowest, p == 0 ? 1 : 2 };
+            const bool tapped = p == 0 && separate != 0u;
             part.render(partBuffers[p].getWritePointer(0), partBuffers[p].getWritePointer(1), n,
-                        std::span<const EngineMidiEvent>(partEvents[p].data(), static_cast<std::size_t>(partEventCount[p])), patch, transport);
-            if (const int broken = scrubBroken(partBuffers[p].getWritePointer(0), partBuffers[p].getWritePointer(1), n); broken > 0)
+                        std::span<const EngineMidiEvent>(partEvents[p].data(), static_cast<std::size_t>(partEventCount[p])), patch, transport,
+                        tapped ? tapOut : nullptr);
+            int broken = scrubBroken(partBuffers[p].getWritePointer(0), partBuffers[p].getWritePointer(1), n);
+            for (int l = 0; tapped && l < CircuitWatch::lightCount; ++l)
+                if (((separate >> l) & 1u) != 0u)
+                    broken += scrubBroken(tapOut[l], tapOut[l], n); // the same buffer twice: each sample counted once
+            if (broken > 0)
             {
                 part.reset();
                 reportBroken(p == 0 ? 1 : 2, broken);
@@ -489,6 +501,24 @@ namespace coolsynth::synth::v3
                     dryRight[i] += pr[i] * gainRight;
                 }
             }
+            // Layer A's drums on their own outputs at its gains as they move, wet and dry together, the two sides' mean
+            // (a mono output); they skip the inserts above and the master slots below, which the 808's shape has not.
+            for (int t = 0; p == 0 && separate != 0u && t < CircuitWatch::lightCount; ++t)
+            {
+                if (((separate >> t) & 1u) == 0u)
+                    continue;
+                const float dryLeftStep = (target.dryLeft - from.dryLeft) * step, dryRightStep = (target.dryRight - from.dryRight) * step;
+                float wl = from.wetLeft, wr = from.wetRight, dl = from.dryLeft, dr = from.dryRight;
+                float* tap = tapOut[t];
+                for (int i = 0; i < n; ++i)
+                {
+                    wl += wetLeftStep;
+                    wr += wetRightStep;
+                    dl += dryLeftStep;
+                    dr += dryRightStep;
+                    tap[i] *= 0.5f * ((wl + dl) + (wr + dr));
+                }
+            }
         }
         mixPrimed = true;
 
@@ -536,6 +566,22 @@ namespace coolsynth::synth::v3
         }
         masterGain.setTargetValue(std::max(0.0f, settings.masterGainLinear));
         const float fadeStep = (fadeTo - fadeFrom) / static_cast<float>(n);
+        // The drums on their own outputs (D343) at the same master gain and fade, sample for sample: each from a copy
+        // of the gain's ramp as it stands, before the mix moves it on.
+        for (int t = 0; separate != 0u && t < CircuitWatch::lightCount; ++t)
+        {
+            if (((separate >> t) & 1u) == 0u)
+                continue;
+            auto gain = masterGain;
+            float tapFade = fadeFrom;
+            float* tap = tapOut[t];
+            for (int i = 0; i < n; ++i)
+            {
+                const float g = gain.getNextValue();
+                tapFade += fadeStep;
+                tap[i] = tap[i] * g * tapFade;
+            }
+        }
         float fade = fadeFrom;
         float blockPeak = 0.0f;
         for (int i = 0; i < n; ++i)

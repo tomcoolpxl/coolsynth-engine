@@ -99,6 +99,9 @@ namespace coolsynth::synth::v3
         LiveBuffer* live = nullptr;       // a Grain slot with combine Live: the voice's recording to write and read
         std::uint32_t* takeTurn = nullptr; // a sampled instrument's takes come round in turn: the part's own count (D162 rule 3)
         CircuitWatch* watch = nullptr;     // the 808's generators: where their instruments' levels go; null, none (D313)
+        // The 808's generators: the voice's taps, one per CircuitWatch light, for the drums on their own outputs
+        // (CoolSynth's D343); a separated light's is written every sample, a null one (or null taps) is in the mix.
+        float* const* taps = nullptr;
     };
 
     /** Arena of floats, sized once off the audio thread; modules take spans from it in prepare(). */

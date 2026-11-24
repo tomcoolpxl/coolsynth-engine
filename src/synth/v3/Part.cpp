@@ -29,6 +29,7 @@ namespace coolsynth::synth::v3
 
         busLeft.assign(static_cast<std::size_t>(maxBlock * oversampleFactor), 0.0f);
         busRight.assign(static_cast<std::size_t>(maxBlock * oversampleFactor), 0.0f);
+        tapBus.assign(static_cast<std::size_t>(CircuitWatch::lightCount * maxBlock * oversampleFactor), 0.0f);
         frames.assign(static_cast<std::size_t>((maxBlock * oversampleFactor) / Voice::maxSubBlock + 2), {});
         for (std::size_t i = 0; i < globalLfos.size(); ++i)
             globalLfos[i].prepare(voiceRate, seed ^ (0x51ED2700u + static_cast<std::uint32_t>(i)));
@@ -84,6 +85,10 @@ namespace coolsynth::synth::v3
         decimatorRight.reset();
         std::fill(busLeft.begin(), busLeft.end(), 0.0f);
         std::fill(busRight.begin(), busRight.end(), 0.0f);
+        for (auto& d : tapDecimators)
+            d.reset();
+        std::fill(tapBus.begin(), tapBus.end(), 0.0f);
+        tapsLive = 0;
         bendNormalised = 0.0f;
         wheel = 0.0f;
         channelPressure = 0.0f;
@@ -219,12 +224,29 @@ namespace coolsynth::synth::v3
                       int numSamples,
                       std::span<const EngineMidiEvent> events,
                       const PartSettings& settings,
-                      const EngineTransportInfo& transport) noexcept
+                      const EngineTransportInfo& transport,
+                      float* const* tapOut) noexcept
     {
+        // The drums on their own outputs (CoolSynth's D343): the lights given a tap. A light given one anew starts its
+        // decimator from silence, as what it held is from long ago.
+        std::uint32_t separate = 0;
+        if (tapOut != nullptr)
+            for (int l = 0; l < CircuitWatch::lightCount; ++l)
+                if (tapOut[l] != nullptr)
+                {
+                    separate |= 1u << l;
+                    if (((tapsLive >> l) & 1u) == 0u)
+                        tapDecimators[static_cast<std::size_t>(l)].reset();
+                }
+        tapsLive = separate;
+
         if (! prepared)
         {
             std::fill_n(left, numSamples, 0.0f);
             std::fill_n(right, numSamples, 0.0f);
+            for (int l = 0; l < CircuitWatch::lightCount; ++l)
+                if (((separate >> l) & 1u) != 0u)
+                    std::fill_n(tapOut[l], numSamples, 0.0f);
             return;
         }
 
@@ -257,17 +279,26 @@ namespace coolsynth::synth::v3
             std::size_t last = first;
             while (last < events.size() && events[last].sampleOffset < chunkStart + n)
                 ++last;
-            renderChunk(left + chunkStart, right + chunkStart, n, events.subspan(first, last - first), chunkStart, settings, transport);
+            std::array<float*, CircuitWatch::lightCount> chunkTaps;
+            if (separate != 0u)
+                for (int l = 0; l < CircuitWatch::lightCount; ++l)
+                    chunkTaps[static_cast<std::size_t>(l)] = ((separate >> l) & 1u) != 0u ? tapOut[l] + chunkStart : nullptr;
+            renderChunk(left + chunkStart, right + chunkStart, n, events.subspan(first, last - first), chunkStart, settings, transport,
+                        separate != 0u ? chunkTaps.data() : nullptr);
             first = last;
         }
     }
 
     void Part::renderChunk(float* left, float* right, int n, std::span<const EngineMidiEvent> events, int offsetBase,
-                           const PartSettings& settings, const EngineTransportInfo& transport) noexcept
+                           const PartSettings& settings, const EngineTransportInfo& transport, float* const* tapOut) noexcept
     {
         const int voiceSamples = n * oversampleFactor;
         std::fill_n(busLeft.data(), voiceSamples, 0.0f);
         std::fill_n(busRight.data(), voiceSamples, 0.0f);
+        const auto busOf = [this](int light) { return tapBus.data() + static_cast<std::size_t>(light * maxBlock * oversampleFactor); };
+        for (int l = 0; tapOut != nullptr && l < CircuitWatch::lightCount; ++l)
+            if (((tapsLive >> l) & 1u) != 0u)
+                std::fill_n(busOf(l), voiceSamples, 0.0f);
         updateGlobals(settings);
 
         const bool hostTempo = transport.hostHasTempo && transport.hostBpm > 0.0;
@@ -425,6 +456,20 @@ namespace coolsynth::synth::v3
             std::copy(bl, bl + n, left);
             std::copy(br, br + n, right);
         }
+
+        // Each drum on its own output the same way, through its own decimator.
+        for (int l = 0; tapOut != nullptr && l < CircuitWatch::lightCount; ++l)
+        {
+            if (((tapsLive >> l) & 1u) == 0u)
+                continue;
+            float* bus = busOf(l);
+            for (int i = 0; i < voiceSamples; ++i)
+                bus[i] *= voiceHeadroom;
+            if (oversampleFactor == 2)
+                tapDecimators[static_cast<std::size_t>(l)].processBlock(bus, tapOut[l], n);
+            else
+                std::copy(bus, bus + n, tapOut[l]);
+        }
     }
 
     void Part::renderSpan(int start, int count, const PartSettings& settings) noexcept
@@ -488,12 +533,20 @@ namespace coolsynth::synth::v3
         globals.takeTurn = &takeTurn;
         globals.watch = watch;
 
+        // The drums on their own outputs (CoolSynth's D343): each live light's bus from this span on.
+        std::array<float*, CircuitWatch::lightCount> spanTaps;
+        if (tapsLive != 0u)
+            for (int l = 0; l < CircuitWatch::lightCount; ++l)
+                spanTaps[static_cast<std::size_t>(l)] = ((tapsLive >> l) & 1u) != 0u
+                    ? tapBus.data() + static_cast<std::size_t>(l * maxBlock * oversampleFactor + offset) : nullptr;
+        float* const* taps = tapsLive != 0u ? spanTaps.data() : nullptr;
+
         for (std::size_t i = 0; i < voices.size(); ++i)
         {
             auto& v = voices[i];
             if (! v.isActive())
                 continue;
-            v.render(busLeft.data() + offset, busRight.data() + offset, length, settings.voice, globals);
+            v.render(busLeft.data() + offset, busRight.data() + offset, length, settings.voice, globals, taps);
             if (! v.isActive())
             {
                 state[i].keyDown = false;
@@ -605,6 +658,8 @@ namespace coolsynth::synth::v3
                 sustainDown = false;
                 decimatorLeft.reset();
                 decimatorRight.reset();
+                for (auto& d : tapDecimators)
+                    d.reset();
                 soundOffPending = true;
                 break;
 

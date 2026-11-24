@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "synth/v3/CircuitWatch.h"
+#include "synth/v3/EngineV3.h"
 #include "synth/v3/Part.h"
 #include "synth/v3/Tr808RimShot.h"
 #include "synth/v3/Tr808Tom.h"
@@ -696,6 +697,166 @@ public:
 };
 
 static V3Tr808KitTests v3Tr808KitTests;
+
+namespace
+{
+    /** The 808's whole kit as the app plays it: its three generators in one Kit voice, at the stock levels. */
+    EngineSettings wholeKitOf(float masterGain)
+    {
+        EngineSettings out;
+        auto& part = out.parts[0];
+        part.playMode = PlayMode::kit;
+        const int types[] = { generatorType::drums808, generatorType::snareClap808, generatorType::metal808 };
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            auto& g = part.voice.generators[i];
+            g.type = types[i];
+            const auto& d = GeneratorSlot::typeTable().descriptor(g.type);
+            for (int k = 0; k < d.usedParams; ++k)
+                g.p[static_cast<std::size_t>(k)] = unitsToNormalised(d.params[static_cast<std::size_t>(k)], d.params[static_cast<std::size_t>(k)].def);
+            g.level = 0.8f;
+        }
+        Envelope::Parameters amp;
+        amp.attack = 0.0f;
+        amp.decay = 1.0f;
+        amp.sustain = 1.0f;
+        amp.release = 10.0f;
+        amp.velocitySensitivity = 0.0f;
+        part.voice.envelopes[0] = amp;
+        out.masterGainLinear = masterGain;
+        return out;
+    }
+
+    struct OwnRender
+    {
+        std::vector<float> left, right;
+        std::array<std::vector<float>, CircuitWatch::lightCount> taps;
+    };
+
+    /** The engine playing these hits in host blocks of `block` (longer than its prepared 256: it splits them), with a
+        watch separating `separate` and taps given (each filled with `untouched` first), or neither. */
+    OwnRender playEngine(const std::vector<Hit>& hits, double seconds, bool watched, std::uint32_t separate, bool tapsGiven,
+                         float untouched = 7.0f)
+    {
+        constexpr double rate = 48000.0;
+        constexpr int block = 400;
+        auto engine = std::make_unique<EngineV3>(EngineShape::singleLayer());
+        engine->prepare(rate, 256, 2);
+        auto watchOwner = std::make_unique<CircuitWatch>(); // 800 kB: not on the test runner's stack
+        watchOwner->setSeparate(separate);
+        if (watched)
+            engine->setCircuitWatch(watchOwner.get());
+        const auto settings = wholeKitOf(0.25f); // the kit's Volume near -12 dB: under the soft clip's knee
+        OwnRender out;
+        juce::AudioBuffer<float> buffer(2, block);
+        std::array<std::vector<float>, CircuitWatch::lightCount> tapBuffers;
+        std::array<float*, CircuitWatch::lightCount> tapPointers {};
+        for (std::size_t l = 0; l < tapBuffers.size(); ++l)
+        {
+            tapBuffers[l].assign(static_cast<std::size_t>(block), 0.0f);
+            tapPointers[l] = tapBuffers[l].data();
+        }
+        const int blocks = static_cast<int>(seconds * rate) / block;
+        for (int b = 0; b < blocks; ++b)
+        {
+            std::vector<coolsynth::synth::EngineMidiEvent> events;
+            for (const auto& h : hits)
+                if (h.sample >= b * block && h.sample < (b + 1) * block)
+                {
+                    coolsynth::synth::EngineMidiEvent e;
+                    e.type = coolsynth::synth::EngineMidiEventType::noteOn;
+                    e.sampleOffset = h.sample - b * block;
+                    e.noteNumber = static_cast<std::uint8_t>(h.note);
+                    e.value = 1.0f;
+                    events.push_back(e);
+                }
+            for (auto& t : tapBuffers)
+                std::fill(t.begin(), t.end(), untouched);
+            buffer.clear();
+            engine->render(buffer, events, settings, {}, tapsGiven ? tapPointers.data() : nullptr);
+            out.left.insert(out.left.end(), buffer.getReadPointer(0), buffer.getReadPointer(0) + block);
+            out.right.insert(out.right.end(), buffer.getReadPointer(1), buffer.getReadPointer(1) + block);
+            for (std::size_t l = 0; l < tapBuffers.size(); ++l)
+                out.taps[l].insert(out.taps[l].end(), tapBuffers[l].begin(), tapBuffers[l].end());
+        }
+        return out;
+    }
+}
+
+/*
+    The 808's drums on their own outputs (CoolSynth's D343): a separated drum leaves the main mix and comes out on its
+    own, as it would have sounded there, so the main and the separated drums add up to the whole mix.
+*/
+class V3Tr808OwnOutputTests final : public juce::UnitTest
+{
+public:
+    V3Tr808OwnOutputTests() : juce::UnitTest("V3 TR-808 kit own outputs", "V3") {}
+
+    void runTest() override
+    {
+        beginTest("separated_drums_and_the_main_add_up_to_the_whole_mix");
+        {
+            // Every generator's instruments, overlapping: the bass drum, the snare and the closed hat separated, the
+            // rim shot, a tom, the clap, the cowbell and the open hat left in the main.
+            const std::vector<Hit> hits { { 0, 36 }, { 0, 42 }, { 2400, 46 }, { 4800, 38 }, { 4800, 42 }, { 7000, 43 },
+                                          { 9600, 39 }, { 9600, 36 }, { 12000, 56 }, { 14400, 37 }, { 14400, 42 }, { 16800, 38 } };
+            constexpr double seconds = 1.0;
+            const std::uint32_t separate = (1u << CircuitWatch::bassDrum) | (1u << CircuitWatch::snare) | (1u << CircuitWatch::closedHat);
+
+            const auto plain = playEngine(hits, seconds, false, 0u, false);
+            const auto maskZero = playEngine(hits, seconds, true, 0u, true);
+            const auto apart = playEngine(hits, seconds, true, separate, true);
+
+            // Nothing separated: the same samples, bit for bit, as with no watch and no taps; no tap written.
+            expect(plain.left == maskZero.left && plain.right == maskZero.right, "a zero mask changes nothing");
+            bool written = false;
+            for (const auto& t : maskZero.taps)
+                for (const float v : t)
+                    written = written || v != 7.0f;
+            expect(! written, "a zero mask writes no tap");
+
+            // The main without them, and each on its own.
+            const float wholePeak = std::max(peakOf(plain.left), peakOf(plain.right));
+            logMessage("the whole mix's peak " + juce::String(wholePeak, 4) + " (the soft clip's knee is 0.8)");
+            expectLessThan(wholePeak, 0.8f);
+            for (const int light : { CircuitWatch::bassDrum, CircuitWatch::snare, CircuitWatch::closedHat })
+                expectGreaterThan(peakOf(apart.taps[static_cast<std::size_t>(light)]), 0.005f, "light " + juce::String(light) + " on its own output");
+            expectLessThan(peakOf(apart.left, 0, 2400), 1.0e-6f, "the first bass drum and closed hat are not in the main");
+
+            // A drum left in the main: its tap untouched.
+            for (int light = 0; light < CircuitWatch::lightCount; ++light)
+            {
+                if (((separate >> light) & 1u) != 0u)
+                    continue;
+                const auto& t = apart.taps[static_cast<std::size_t>(light)];
+                expect(std::all_of(t.begin(), t.end(), [](float v) { return v == 7.0f; }), "light " + juce::String(light) + "'s tap not written");
+            }
+
+            // The main and the separated drums against the whole mix, each side.
+            const auto& bd = apart.taps[CircuitWatch::bassDrum];
+            const auto& sd = apart.taps[CircuitWatch::snare];
+            const auto& ch = apart.taps[CircuitWatch::closedHat];
+            for (int side = 0; side < 2; ++side)
+            {
+                const auto& whole = side == 0 ? plain.left : plain.right;
+                const auto& main = side == 0 ? apart.left : apart.right;
+                double rest = 0.0, energy = 0.0;
+                for (std::size_t i = 0; i < whole.size(); ++i)
+                {
+                    const double d = static_cast<double>(main[i]) + bd[i] + sd[i] + ch[i] - whole[i];
+                    rest += d * d;
+                    energy += static_cast<double>(whole[i]) * whole[i];
+                }
+                const double db = 10.0 * std::log10(std::max(rest, 1.0e-300) / energy);
+                logMessage(juce::String(side == 0 ? "left" : "right") + ": the main and the three taps against the whole mix, "
+                           + juce::String(db, 1) + " dB");
+                expectLessThan(db, -100.0, "they add up to the whole mix");
+            }
+        }
+    }
+};
+
+static V3Tr808OwnOutputTests v3Tr808OwnOutputTests;
 
 /*
     The rim shot's two rings against both units (D258), opt-in: with COOLSYNTH_808_RIM_FIT set to "r308:r312:r318:r320"

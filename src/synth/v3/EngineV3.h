@@ -62,15 +62,24 @@ namespace coolsynth::synth::v3
             use of it. */
         void setCircuitWatch(CircuitWatch* w) noexcept
         {
+            watch = w;
             for (auto& u : units)
                 if (u != nullptr)
                     u->setCircuitWatch(w);
         }
         void releaseResources() noexcept {}
+        /**
+            `tapOut`: the 808's drums on their own outputs (CoolSynth's D343), CircuitWatch::lightCount mono buffers
+            of at least the block's length at the host's rate, or null for none. A light in the watch's separate mask
+            with a buffer given leaves the main mix and is written there, as it would have sounded in the mix (only the
+            soft clip is the main's alone); the others' buffers are left as they are. Only the sound being played, its
+            layer A, gives taps: an earlier sound ringing on plays its drums in the main.
+        */
         void render(juce::AudioBuffer<float>& buffer,
                     std::span<const EngineMidiEvent> events,
                     const EngineSettings& settings,
-                    const EngineTransportInfo& transport = {}) noexcept;
+                    const EngineTransportInfo& transport = {},
+                    float* const* tapOut = nullptr) noexcept;
         void panic() noexcept;
         /** As prepare leaves it: every sound ended, the first current, every random number from its seed (D222). */
         void restart() noexcept;
@@ -158,7 +167,7 @@ namespace coolsynth::synth::v3
 
         /** One block no longer than the prepared size. */
         void renderBlock(juce::AudioBuffer<float>& buffer, std::span<const EngineMidiEvent> events,
-                         const EngineSettings& settings, const EngineTransportInfo& transport) noexcept;
+                         const EngineSettings& settings, const EngineTransportInfo& transport, float* const* taps) noexcept;
         void followSoundChange(const EngineSettings& settings) noexcept;
         void routeEvents(std::span<const EngineMidiEvent> events) noexcept;
         void pushEvent(int unit, const EngineMidiEvent& event) noexcept;
@@ -167,6 +176,7 @@ namespace coolsynth::synth::v3
         [[nodiscard]] int oldestRinging() const noexcept;
 
         EngineShape engineShape;
+        CircuitWatch* watch = nullptr; // the app's, for the drums it separates (D343)
         bool oversampling = true;
         int unitsHeld = unitCount; // 1 without earlier sounds: the other units are then null and stay idle
         std::array<std::unique_ptr<SoundUnit>, unitCount> units;
@@ -202,6 +212,7 @@ namespace coolsynth::synth::v3
             const EngineSettings* settings = nullptr;
             float fadeFrom = 1.0f, fadeTo = 1.0f;
             StageTiming timing {};
+            float* const* taps = nullptr; // the sound being played: the drums on their own outputs (D343)
         };
         static void renderUnitTask(void* engine, int index) noexcept;
         std::array<juce::AudioBuffer<float>, unitCount> unitOut;

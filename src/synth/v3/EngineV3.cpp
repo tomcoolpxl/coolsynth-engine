@@ -254,7 +254,7 @@ namespace coolsynth::synth::v3
         const auto u = static_cast<std::size_t>(task.unit);
         e.units[u]->render(l, r, e.taskBlock,
                            std::span<const EngineMidiEvent>(e.unitEvents[u].data(), static_cast<std::size_t>(e.unitEventCount[u])),
-                           *task.settings, *e.taskTransport, task.fadeFrom, task.fadeTo, task.timing);
+                           *task.settings, *e.taskTransport, task.fadeFrom, task.fadeTo, task.timing, task.taps);
     }
 
     std::uint32_t EngineV3::oldestSoundingGeneration() const noexcept
@@ -389,9 +389,29 @@ namespace coolsynth::synth::v3
     void EngineV3::render(juce::AudioBuffer<float>& buffer,
                           std::span<const EngineMidiEvent> events,
                           const EngineSettings& settings,
-                          const EngineTransportInfo& transport) noexcept
+                          const EngineTransportInfo& transport,
+                          float* const* tapOut) noexcept
     {
         const int n = buffer.getNumSamples();
+        // The drums on their own outputs (CoolSynth's D343): the lights the watch separates and a buffer is given for,
+        // silent until the sound being played writes them. With none, no taps go further.
+        constexpr int lightCount = CircuitWatch::lightCount;
+        std::uint32_t separate = 0;
+        if (tapOut != nullptr && watch != nullptr)
+            separate = watch->separateMask() & ((1u << lightCount) - 1u);
+        std::array<float*, lightCount> taps;
+        if (separate != 0u)
+            for (int l = 0; l < lightCount; ++l)
+            {
+                const auto i = static_cast<std::size_t>(l);
+                taps[i] = ((separate >> l) & 1u) != 0u ? tapOut[l] : nullptr;
+                if (taps[i] == nullptr)
+                    separate &= ~(1u << l);
+                else if (n > 0)
+                    std::fill_n(taps[i], n, 0.0f);
+            }
+        float* const* blockTaps = separate != 0u ? taps.data() : nullptr;
+
         if (! prepared || n <= 0)
         {
             buffer.clear();
@@ -402,7 +422,7 @@ namespace coolsynth::synth::v3
         const int maxBlock = sum.getNumSamples();
         if (n <= maxBlock)
         {
-            renderBlock(buffer, events, settings, transport);
+            renderBlock(buffer, events, settings, transport, blockTaps);
             return;
         }
 
@@ -423,14 +443,20 @@ namespace coolsynth::synth::v3
             auto pieceTransport = transport;
             if (pieceTransport.hostHasTempo && pieceTransport.hostBpm > 0.0)
                 pieceTransport.hostPpqAtBlockStart += pieceTransport.hostBpm / 60.0 / hostRate * static_cast<double>(start);
-            renderBlock(piece, std::span<const EngineMidiEvent>(pieceEvents.data(), count), settings, pieceTransport);
+            std::array<float*, lightCount> pieceTaps;
+            if (separate != 0u)
+                for (std::size_t l = 0; l < pieceTaps.size(); ++l)
+                    pieceTaps[l] = taps[l] != nullptr ? taps[l] + start : nullptr;
+            renderBlock(piece, std::span<const EngineMidiEvent>(pieceEvents.data(), count), settings, pieceTransport,
+                        separate != 0u ? pieceTaps.data() : nullptr);
         }
     }
 
     void EngineV3::renderBlock(juce::AudioBuffer<float>& buffer,
                                std::span<const EngineMidiEvent> events,
                                const EngineSettings& settings,
-                               const EngineTransportInfo& transport) noexcept
+                               const EngineTransportInfo& transport,
+                               float* const* taps) noexcept
     {
         const int n = buffer.getNumSamples();
         slowest = {};
@@ -472,7 +498,8 @@ namespace coolsynth::synth::v3
             const float fadeFrom = s.fade;
             if (s.phase == Phase::fading)
                 s.fade = std::max(0.0f, s.fade - static_cast<float>(seconds / fadeSeconds));
-            tasks[static_cast<std::size_t>(taskTotal++)] = { u, u == current ? &settings : s.settings.get(), fadeFrom, s.fade, {} };
+            tasks[static_cast<std::size_t>(taskTotal++)] = { u, u == current ? &settings : s.settings.get(), fadeFrom, s.fade, {},
+                                                             u == current ? taps : nullptr };
         }
 
         // Then the units: on several cores when more than one sounds (D164), each into its own buffer.
@@ -512,6 +539,7 @@ namespace coolsynth::synth::v3
                 endUnit(u);
         }
 
+        // The soft clip is the main's alone: a drum on its own output (D343) leaves as the unit wrote it.
         for (int i = 0; i < n; ++i)
         {
             clippedSamples += (std::abs(sl[i]) > 0.8f ? 1 : 0) + (std::abs(sr[i]) > 0.8f ? 1 : 0);

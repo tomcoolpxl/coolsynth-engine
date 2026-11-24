@@ -5,10 +5,12 @@
 #include <cstdint>
 #include <type_traits>
 #include <variant>
+#include <vector>
 
 #include <memory>
 
 #include "ChipGenerator.h"
+#include "CircuitWatch.h"
 #include "Envelope.h"
 #include "LiveBuffer.h"
 #include "Fm4Generator.h"
@@ -266,8 +268,11 @@ namespace coolsynth::synth::v3
         /** Key pressure and the expression pedal reach the matrix smoothed over about this long. */
         static constexpr float pressureSmoothingSeconds = 0.01f;
 
-        /** Adds the voice into left and right. */
-        void render(float* left, float* right, int numSamples, const VoiceSettings& settings, const VoiceGlobals& globals) noexcept;
+        /** Adds the voice into left and right; and into `taps` (one per CircuitWatch light, null where a light is in
+            the mix; null for none) the 808's drums on their own outputs, as they would have sounded in the mix
+            (CoolSynth's D343). */
+        void render(float* left, float* right, int numSamples, const VoiceSettings& settings, const VoiceGlobals& globals,
+                    float* const* taps = nullptr) noexcept;
 
         [[nodiscard]] bool isActive() const noexcept;
         [[nodiscard]] bool isReleased() const noexcept { return released; }
@@ -310,7 +315,8 @@ namespace coolsynth::synth::v3
         [[nodiscard]] std::array<float, envelopeCount> envelopeTimeFactors(const ModSources& base, const NoteStart& start, float random) const noexcept;
         void startEnvelopes(const std::array<float, envelopeCount>& timeFactors) noexcept;
         void retarget(int noteNumber, float detuneCents, bool glide) noexcept;
-        void renderSubBlock(float* left, float* right, int offset, int n, const VoiceSettings& settings, const VoiceGlobals& globals) noexcept;
+        void renderSubBlock(float* left, float* right, int offset, int n, const VoiceSettings& settings, const VoiceGlobals& globals,
+                            float* const* taps) noexcept;
         void advancePitch(int n, const VoiceSettings& settings) noexcept;
         void advanceDrift(int n) noexcept;
         float nextRandom() noexcept; // -1..1
@@ -328,6 +334,9 @@ namespace coolsynth::synth::v3
         bool vcaSnap = true;
         std::array<Envelope::Parameters, envelopeCount> appliedEnvelopes {};
         std::array<float, maxSubBlock> ampBuffer {}, mixLeft {}, mixRight {};
+        // The drums on their own outputs (CoolSynth's D343), a sub-block per light: what a generator writes, then the
+        // voice's sum of them at their levels. On the heap, from prepare: a voice is kept in an array.
+        std::vector<float> tapMemory;
         ModSources sources;
 
         NoteStart note, pendingNote;
