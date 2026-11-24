@@ -346,10 +346,13 @@ namespace coolsynth::synth::v3
             return volts[k] + w * (volts[k + 1] - volts[k]);
         }
 
-        /** Q28's source with R105 alone: Vs / R105 = beta (Vg - Vs - Vp)^2 (1 + lambda (Vdd - Vs)), by Newton. */
-        static double followerAt(double gate) noexcept
+        /** Q28's source with R105 alone: Vs / R105 = beta (Vg - Vs - Vp)^2 (1 + lambda (Vdd - Vs)), by Newton, from
+            the last step's answer (the gate moves little in a step, so a step or two lands within 1e-12 V of where
+            the fixed start's six or so did; the user's choice, CoolSynth's D341), or from the fixed start when that
+            answer is off the channel. */
+        static double followerAt(double gate, double from) noexcept
         {
-            double vs = std::max(0.0, gate - jfetPinch - 0.03);
+            double vs = gate - from - jfetPinch > 0.0 && from >= 0.0 ? from : std::max(0.0, gate - jfetPinch - 0.03);
             for (int i = 0; i < 30; ++i)
             {
                 const double vov = gate - vs - jfetPinch;
@@ -373,7 +376,7 @@ namespace coolsynth::synth::v3
         /** The follower at this gate voltage: its open output and its output resistance (1 / gm against R105). */
         void follow(double gate) noexcept
         {
-            followerOpen = followerAt(gate);
+            followerOpen = followerAt(gate, followerOpen);
             const double vov = std::max(1.0e-6, gate - followerOpen - jfetPinch);
             const double gm = 2.0 * jfetBeta * vov * (1.0 + jfetLambda * (supply - followerOpen));
             followerOhms = 1.0 / (gm + 1.0 / r105);

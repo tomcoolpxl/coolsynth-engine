@@ -864,7 +864,91 @@ namespace coolsynth::synth::v3::wdf
                 }
                 tapNodes = n;
             }
+            for (int c = 0; c < linear + m; ++c)
+            {
+                const auto col = static_cast<std::size_t>(c);
+                for (int r = 0; r < m && c < linear; ++r)
+                    devicesByColumn[col][static_cast<std::size_t>(r)] = toDevices[static_cast<std::size_t>(r)][col];
+                for (int r = 0; r < capacitorCount; ++r)
+                    capacitorsByColumn[col][static_cast<std::size_t>(r)] = toCapacitors[static_cast<std::size_t>(r)][col];
+                for (int j = 0; j < probeCount; ++j)
+                    probesByColumn[col][static_cast<std::size_t>(j)] = toProbes[static_cast<std::size_t>(j)][col];
+            }
+            for (int c = 0; c < m; ++c)
+                for (int r = 0; r < m; ++r)
+                    kByColumn[static_cast<std::size_t>(c)][static_cast<std::size_t>(r)] = K[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)];
             dirty = false;
+        }
+
+        /** y = A x for A kept by column (column c at byColumn + c * stride): the rows side by side, each summed from
+            its first column to its last as a plain dot product sums it, so every bit is as a row at a time gives,
+            without one long chain of additions each waiting on the one before. */
+        static void rowsTimes(const double* __restrict byColumn, int stride, int rows, int columns,
+                              const double* __restrict x, double* __restrict y) noexcept
+        {
+            int r = 0;
+            for (; r + 8 <= rows; r += 8) // eight sums in registers, each its own chain
+            {
+                double s0 = 0.0, s1 = 0.0, s2 = 0.0, s3 = 0.0, s4 = 0.0, s5 = 0.0, s6 = 0.0, s7 = 0.0;
+                const double* a = byColumn + r;
+                for (int c = 0; c < columns; ++c, a += stride)
+                {
+                    const double xc = x[c];
+                    s0 += a[0] * xc;
+                    s1 += a[1] * xc;
+                    s2 += a[2] * xc;
+                    s3 += a[3] * xc;
+                    s4 += a[4] * xc;
+                    s5 += a[5] * xc;
+                    s6 += a[6] * xc;
+                    s7 += a[7] * xc;
+                }
+                y[r] = s0;
+                y[r + 1] = s1;
+                y[r + 2] = s2;
+                y[r + 3] = s3;
+                y[r + 4] = s4;
+                y[r + 5] = s5;
+                y[r + 6] = s6;
+                y[r + 7] = s7;
+            }
+            for (; r + 4 <= rows; r += 4)
+            {
+                double s0 = 0.0, s1 = 0.0, s2 = 0.0, s3 = 0.0;
+                const double* a = byColumn + r;
+                for (int c = 0; c < columns; ++c, a += stride)
+                {
+                    const double xc = x[c];
+                    s0 += a[0] * xc;
+                    s1 += a[1] * xc;
+                    s2 += a[2] * xc;
+                    s3 += a[3] * xc;
+                }
+                y[r] = s0;
+                y[r + 1] = s1;
+                y[r + 2] = s2;
+                y[r + 3] = s3;
+            }
+            for (; r + 2 <= rows; r += 2)
+            {
+                double s0 = 0.0, s1 = 0.0;
+                const double* a = byColumn + r;
+                for (int c = 0; c < columns; ++c, a += stride)
+                {
+                    s0 += a[0] * x[c];
+                    s1 += a[1] * x[c];
+                }
+                y[r] = s0;
+                y[r + 1] = s1;
+            }
+            for (; r < rows; ++r)
+            {
+                double s = 0.0;
+                const double* a = byColumn + r;
+                for (int c = 0; c < columns; ++c, a += stride)
+                    s += a[0] * x[c];
+                y[r] = s;
+            }
         }
 
         /** Gauss-Jordan; false when a pivot vanishes (the nonlinear ports' currents tied by the linear part alone).
@@ -964,14 +1048,7 @@ namespace coolsynth::synth::v3::wdf
             {
                 // p = M (S a + Q u) over the linear part, for the devices' ports (folded into one matrix).
                 double p[maxDevicePorts];
-                for (int r = 0; r < m; ++r)
-                {
-                    const double* row = toDevices[static_cast<std::size_t>(r)].data();
-                    double sum = 0.0;
-                    for (int c = 0; c < linear; ++c)
-                        sum += row[c] * x[c];
-                    p[r] = sum;
-                }
+                rowsTimes(devicesByColumn[0].data(), maxDevicePorts, m, linear, x, p);
                 solveDevices(p, iterationLimit);
                 // The waves the devices send back: a = v - R i.
                 const int* devicePort = nonlinearPort.data();
@@ -989,23 +1066,11 @@ namespace coolsynth::synth::v3::wdf
             // back), and read the probes, both from the packed waves.
             const int columns = linear + m;
             const int* keeper = capacitorPort.data();
+            double back[MaxPorts > 0 ? MaxPorts : 1];
+            rowsTimes(capacitorsByColumn[0].data(), MaxPorts, capacitorCount, columns, x, back);
             for (int r = 0; r < capacitorCount; ++r)
-            {
-                const double* row = toCapacitors[static_cast<std::size_t>(r)].data();
-                double sum = 0.0;
-                for (int c = 0; c < columns; ++c)
-                    sum += row[c] * x[c];
-                port[keeper[r]].fromRoot = sum;
-            }
-            double* probe = probes.data();
-            for (int j = 0; j < probeCount; ++j)
-            {
-                const double* row = toProbes[static_cast<std::size_t>(j)].data();
-                double sum = 0.0;
-                for (int c = 0; c < columns; ++c)
-                    sum += row[c] * x[c];
-                probe[j] = sum;
-            }
+                port[keeper[r]].fromRoot = back[r];
+            rowsTimes(probesByColumn[0].data(), static_cast<int>(probesByColumn[0].size()), probeCount, columns, x, probes.data());
         }
 
         /**
@@ -1197,6 +1262,7 @@ namespace coolsynth::synth::v3::wdf
             const double* k[maxDevicePorts];
             for (int r = 0; r < m; ++r)
                 k[r] = K[static_cast<std::size_t>(r)].data();
+            const double* kColumns = kByColumn[0].data();
 
             // The start. While every junction is below its knee (much of the drum's tail), one fixed-point step,
             // v = p + K i with the last sample's currents: then exact, so the check below usually ends the solve at
@@ -1219,15 +1285,10 @@ namespace coolsynth::synth::v3::wdf
             bool guessed = false;
             if (allOff && ! openCapacitors)
             {
-                const double* i = current.data();
                 double guess[maxDevicePorts];
+                rowsTimes(kColumns, maxDevicePorts, m, m, current.data(), guess);
                 for (int r = 0; r < m; ++r)
-                {
-                    double kf = 0.0;
-                    for (int c = 0; c < m; ++c)
-                        kf += k[r][c] * i[c];
-                    guess[r] = p[r] + kf;
-                }
+                    guess[r] = p[r] + guess[r];
                 // Used only if it stays below the knees too.
                 bool stillOff = true;
                 for (int d = 0; d < deviceCount && stillOff; ++d)
@@ -1281,12 +1342,11 @@ namespace coolsynth::synth::v3::wdf
                 {
                     deviceCurrents(v, f, g);
                     double worst = 0.0;
+                    double kf[maxDevicePorts];
+                    rowsTimes(kColumns, maxDevicePorts, m, m, f, kf);
                     for (int r = 0; r < m; ++r)
                     {
-                        double kf = 0.0;
-                        for (int c = 0; c < m; ++c)
-                            kf += k[r][c] * f[c];
-                        residual[r] = v[r] - target[r] - kf;
+                        residual[r] = v[r] - target[r] - kf[r];
                         worst = std::max(worst, std::abs(residual[r]));
                     }
                     if (worst < residualTolerance) // 100 nV by default: some -150 dB under the drum's volts
@@ -1496,6 +1556,12 @@ namespace coolsynth::synth::v3::wdf
         int sendingCount = 0, linearSendingCount = 0, capacitorCount = 0;
 
         std::array<std::array<double, MaxNonlinear>, MaxNonlinear> K {};
+
+        // The same four matrices by column, for a sample's products (rowsTimes): toDevices, toCapacitors, toProbes, K.
+        std::array<std::array<double, maxDevicePorts>, maxColumns> devicesByColumn {};
+        std::array<std::array<double, MaxPorts>, maxColumns> capacitorsByColumn {};
+        std::array<std::array<double, (MaxProbes > 0 ? MaxProbes : 1)>, maxColumns> probesByColumn {};
+        std::array<std::array<double, maxDevicePorts>, maxDevicePorts> kByColumn {};
 
         int portCount = 0, inputCount = 0, nullorCount = 0, gainCount = 0, deviceCount = 0, nonlinearCount = 0, probeCount = 0;
         int newtonSteps = 0, newtonLimit = maxNewtonSteps;
