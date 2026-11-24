@@ -246,6 +246,28 @@ namespace coolsynth::synth::v3
                 if (running[lowPair] || running[midPair] || running[highPair])
                     pink = nextPink();
 
+                // The toms ringing: two of them side by side in a register's lanes (CoolSynth's D347), the same bits
+                // as one by one; a third alone.
+                std::array<double, 3> tomOut {};
+                {
+                    int ringing[3], count = 0;
+                    for (int t = 0; t < 3; ++t)
+                        if (running[static_cast<std::size_t>(lowPair + t)])
+                            ringing[count++] = t;
+                    int t = 0;
+                    if (tomLanesOn && count >= 2)
+                    {
+                        const auto first = static_cast<std::size_t>(ringing[0]), second = static_cast<std::size_t>(ringing[1]);
+                        Tr808Tom::processPair(toms[first], toms[second], pink, tomLanes, tomOut[first], tomOut[second]);
+                        t = 2;
+                    }
+                    for (; t < count; ++t)
+                    {
+                        const auto one = static_cast<std::size_t>(ringing[t]);
+                        tomOut[one] = toms[one].process(pink);
+                    }
+                }
+
                 double sum = 0.0;
                 for (int k = 0; k < instrumentCount; ++k)
                 {
@@ -269,7 +291,7 @@ namespace coolsynth::synth::v3
                     }
                     else
                     {
-                        y = toms[i - 1].process(pink);
+                        y = tomOut[i - 1]; // solved above
                         if (capture.instrument() == k)
                             capture.after(toms[i - 1], sampleRate);
                         board.after(params.watch, CircuitWatch::lowTom + (k - lowPair), toms[i - 1], sampleRate);
@@ -360,6 +382,8 @@ namespace coolsynth::synth::v3
         [[nodiscard]] bool isRunningForTesting(int instrument) const noexcept { return running[static_cast<std::size_t>(instrument)]; }
         [[nodiscard]] const Tr808Tom& tomForTesting(int pair) const noexcept { return toms[static_cast<std::size_t>(pair)]; }
         [[nodiscard]] const Tr808RimShot& rimForTesting() const noexcept { return rim; }
+        /** Off: every tom solved alone, the scalar path the lanes are held to bit for bit (CoolSynth's D347). */
+        void setTomLanesForTesting(bool on) noexcept { tomLanesOn = on; }
 
     private:
         /** The knobs to the circuits, once a block; a circuit's part is set again only when its knob has moved. */
@@ -468,6 +492,8 @@ namespace coolsynth::synth::v3
         double sampleRate = 96000.0;
         Tr808BassDrum bass;
         std::array<Tr808Tom, 3> toms { Tr808Tom(Tr808Tom::Pair::low), Tr808Tom(Tr808Tom::Pair::mid), Tr808Tom(Tr808Tom::Pair::high) };
+        Tr808Tom::Lanes tomLanes; // two toms ringing at once, side by side (CoolSynth's D347)
+        bool tomLanesOn = true;
         Tr808RimShot rim;
         std::array<bool, instrumentCount> pending {}, pendingOther {}, running {};
         CircuitCapture capture; // a hit's circuit captured for a panel (D317)

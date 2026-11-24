@@ -60,6 +60,7 @@ if(BUILD_TESTING AND COOLSYNTH_ENGINE_TESTS)
             "${COOLSYNTH_ENGINE_ROOT}/tests/EngineTestMain.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/AudioThreadAlarm.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3ChipTests.cpp"
+            "${COOLSYNTH_ENGINE_ROOT}/tests/V3CircuitLanesTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3FmTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3GeneratorTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3KickTests.cpp"

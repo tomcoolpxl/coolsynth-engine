@@ -4,6 +4,14 @@
 #include <array>
 #include <cmath>
 
+// SSE2 for CircuitPair's lanes (every x64 has it; AVX2 stays off), plain loops elsewhere (the Mac's ARM).
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+    #define COOLSYNTH_WDF_SSE2 1
+    #include <emmintrin.h>
+#else
+    #define COOLSYNTH_WDF_SSE2 0
+#endif
+
 /*
     A wave digital filter of one circuit with an R-type root that holds every element and the circuit's nonlinear
     devices together (Werner's 2016 thesis, chapters 2 and 4; D235). The 808 bass drum's resonator and envelope have
@@ -26,6 +34,9 @@ namespace coolsynth::synth::v3::wdf
     /** How many root analyses this thread has run, every circuit together: for the cost tests (D262). */
     inline thread_local long analysesOnThisThread = 0;
 
+    template <class C>
+    class CircuitPair; // two circuits of one build in the two lanes of a register (CoolSynth's D347), below
+
     /** Limits of one circuit: nodes besides ground, ports, ideal inputs, op-amps, nonlinear ports, probes. Tapped:
         every node's voltage and every port's current can be read at any moment (nodeVoltages, portCurrent: the
         TB-303's lid, CoolSynth's Under the Lid); it keeps one more row a node from each analysis, the solve as it was. */
@@ -34,11 +45,15 @@ namespace coolsynth::synth::v3::wdf
     {
         template <int, int, int, int, int, int, bool>
         friend class Circuit; // takeSharedState reads another variant's state
+        template <class>
+        friend class CircuitPair; // steps two of these side by side, as each steps alone
 
     public:
         static constexpr int maxUnknowns = MaxNodes + MaxInputs + MaxNullors;
         static constexpr int maxColumns = MaxPorts + MaxInputs;
         static constexpr int maxDevicePorts = MaxNonlinear > 0 ? MaxNonlinear : 1;
+        static constexpr int maxPorts = MaxPorts;
+        static constexpr int maxProbeSlots = MaxProbes > 0 ? MaxProbes : 1;
 
         // ---- Building (message thread or prepare: no heap, so also safe on the audio thread) -------------------
 
@@ -645,6 +660,7 @@ namespace coolsynth::synth::v3::wdf
         {
             static thread_local Scratch scratchSpace;
             ++analysesOnThisThread;
+            ++analysisStamp; // a CircuitPair's copies of the matrices are made again
             haveFactors = false; // K changes
             const int unknowns = nodeCount() + inputCount + nullorCount;
             const int columns = portCount + inputCount;
@@ -1615,5 +1631,226 @@ namespace coolsynth::synth::v3::wdf
         bool wellPosed = true;
         double sampleRate = 96000.0;
         bool dirty = true, openCapacitors = false;
+        int analysisStamp = 0; // analyses so far: a CircuitPair's copies of the matrices are from this one
+    };
+
+    /**
+        Two circuits of one build (the same parts added in the same order; their values free) solved side by side, a
+        sample of each, in the two lanes of an SSE2 register: SIMD across voices, as Surge XT runs four voices in one
+        register (sst-filters), here two, doubles (CoolSynth's D347). Each lane is bit for bit its circuit solved alone
+        (process(a, b) leaves a and b as a.process(), b.process() does): every sum keeps its order, a multiply and an
+        add stay two roundings (no fused multiply-add; MSVC makes none without /arch:AVX2, clang on ARM needs
+        -ffp-contract=off), and each circuit's own Newton solve is its own, scalar, so a lane that has converged is never
+        moved by the other (the solves differ in their steps, their limiting and their exps, which stay std::exp's).
+        What runs in the lanes is the sample's three products: the linear part's pull on the devices, the waves back
+        to the capacitors and the probes, from copies of both circuits' matrices laid side by side, made again when
+        either is analysed again. Circuits of other shapes, built past their limits or settling are solved one by one.
+        Without SSE2 (the Mac's ARM until NEON) the lanes are plain loops: the same arithmetic, the same order.
+    */
+    template <class C>
+    class CircuitPair final
+    {
+    public:
+        void process(C& a, C& b) noexcept
+        {
+            if (a.overBuilt || b.overBuilt || a.openCapacitors || b.openCapacitors)
+            {
+                a.process();
+                b.process();
+                return;
+            }
+            if (a.dirty)
+                a.analyse();
+            if (b.dirty)
+                b.analyse();
+            if (&a != laneA || &b != laneB || a.analysisStamp != stampA || b.analysisStamp != stampB)
+                interleave(a, b);
+            if (! sameShape)
+            {
+                a.process(); // analysed: each takes its sample as it would alone
+                b.process();
+                return;
+            }
+
+            alignas(16) double x[2 * C::maxColumns];
+            const int linear = gather(a, x, 0);
+            gather(b, x, 1);
+            const int m = a.nonlinearCount;
+            if (m > 0)
+            {
+                alignas(16) double p[2 * C::maxDevicePorts];
+                rowsTimes2(devices.data(), m, linear, x, p);
+                solve(a, p, x, linear, 0);
+                solve(b, p, x, linear, 1);
+            }
+            const int columns = linear + m;
+            alignas(16) double back[2 * C::maxPorts];
+            rowsTimes2(capacitors.data(), capacitorRows, columns, x, back);
+            scatter(a, back, 0);
+            scatter(b, back, 1);
+            alignas(16) double read[2 * C::maxProbeSlots];
+            rowsTimes2(probes.data(), probeRows, columns, x, read);
+            for (int j = 0; j < probeRows; ++j)
+            {
+                a.probes[static_cast<std::size_t>(j)] = read[2 * j];
+                b.probes[static_cast<std::size_t>(j)] = read[2 * j + 1];
+            }
+        }
+
+    private:
+        /** Both circuits' matrices side by side, element (c, r) of a matrix of n rows at [2 (c n + r) + lane]. */
+        void interleave(const C& a, const C& b) noexcept
+        {
+            laneA = &a;
+            laneB = &b;
+            stampA = a.analysisStamp;
+            stampB = b.analysisStamp;
+            sameShape = a.linearSendingCount == b.linearSendingCount && a.inputCount == b.inputCount
+                        && a.nonlinearCount == b.nonlinearCount && a.capacitorCount == b.capacitorCount
+                        && a.probeCount == b.probeCount;
+            if (! sameShape)
+                return;
+            const int linear = a.linearSendingCount + a.inputCount, m = a.nonlinearCount, columns = linear + m;
+            capacitorRows = a.capacitorCount;
+            probeRows = a.probeCount;
+            for (int c = 0; c < columns; ++c)
+            {
+                const auto col = static_cast<std::size_t>(c);
+                for (int r = 0; r < m && c < linear; ++r)
+                {
+                    const auto at = static_cast<std::size_t>(2 * (c * m + r));
+                    devices[at] = a.devicesByColumn[col][static_cast<std::size_t>(r)];
+                    devices[at + 1] = b.devicesByColumn[col][static_cast<std::size_t>(r)];
+                }
+                for (int r = 0; r < capacitorRows; ++r)
+                {
+                    const auto at = static_cast<std::size_t>(2 * (c * capacitorRows + r));
+                    capacitors[at] = a.capacitorsByColumn[col][static_cast<std::size_t>(r)];
+                    capacitors[at + 1] = b.capacitorsByColumn[col][static_cast<std::size_t>(r)];
+                }
+                for (int r = 0; r < probeRows; ++r)
+                {
+                    const auto at = static_cast<std::size_t>(2 * (c * probeRows + r));
+                    probes[at] = a.probesByColumn[col][static_cast<std::size_t>(r)];
+                    probes[at + 1] = b.probesByColumn[col][static_cast<std::size_t>(r)];
+                }
+            }
+        }
+
+        /** The waves into the root, as Circuit::step packs them (never settling here), into the circuit's own packed
+            waves (its tap reads them) and its lane; returns how many are linear. */
+        static int gather(C& c, double* x, int lane) noexcept
+        {
+            auto* port = c.ports.data();
+            const int* send = c.sending.data();
+            double* packed = c.packed.data();
+            for (int j = 0; j < c.linearSendingCount; ++j)
+            {
+                auto& p = port[send[j]];
+                if (p.kind == C::Kind::capacitor)
+                {
+                    p.alphaState = p.keep * p.alphaState + p.take * p.fromRoot;
+                    p.toRoot = p.alphaState;
+                }
+                else
+                    p.toRoot = p.volts;
+                packed[j] = p.toRoot;
+                x[2 * j + lane] = p.toRoot;
+            }
+            const double* in = c.inputs.data();
+            for (int j = 0; j < c.inputCount; ++j)
+            {
+                packed[c.linearSendingCount + j] = in[j];
+                x[2 * (c.linearSendingCount + j) + lane] = in[j];
+            }
+            return c.linearSendingCount + c.inputCount;
+        }
+
+        /** One circuit's devices, by its own Newton solve, from its lane of the linear part's pull; their waves back. */
+        static void solve(C& c, const double* p2, double* x, int linear, int lane) noexcept
+        {
+            const int m = c.nonlinearCount;
+            double p[C::maxDevicePorts];
+            for (int r = 0; r < m; ++r)
+                p[r] = p2[2 * r + lane];
+            c.solveDevices(p, c.newtonLimit);
+            auto* port = c.ports.data();
+            const int* devicePort = c.nonlinearPort.data();
+            const double* v = c.voltage.data();
+            const double* i = c.current.data();
+            double* packed = c.packed.data();
+            for (int r = 0; r < m; ++r)
+            {
+                auto& d = port[devicePort[r]];
+                d.toRoot = v[r] - d.resistance * i[r];
+                packed[linear + r] = d.toRoot;
+                x[2 * (linear + r) + lane] = d.toRoot;
+            }
+        }
+
+        static void scatter(C& c, const double* back, int lane) noexcept
+        {
+            auto* port = c.ports.data();
+            const int* keeper = c.capacitorPort.data();
+            for (int r = 0; r < c.capacitorCount; ++r)
+                port[keeper[r]].fromRoot = back[2 * r + lane];
+        }
+
+        /** y = A x in both lanes: each row summed from its first column to its last, as Circuit::rowsTimes sums it
+            (0 plus the first product, then each next one added), so each lane's bits are its circuit's alone. */
+        static void rowsTimes2(const double* __restrict a2, int rows, int columns, const double* __restrict x2,
+                               double* __restrict y2) noexcept
+        {
+            const int stride = 2 * rows;
+            int r = 0;
+#if COOLSYNTH_WDF_SSE2
+            for (; r + 4 <= rows; r += 4)
+            {
+                __m128d s0 = _mm_setzero_pd(), s1 = _mm_setzero_pd(), s2 = _mm_setzero_pd(), s3 = _mm_setzero_pd();
+                const double* a = a2 + 2 * r;
+                for (int c = 0; c < columns; ++c, a += stride)
+                {
+                    const __m128d xc = _mm_load_pd(x2 + 2 * c);
+                    s0 = _mm_add_pd(s0, _mm_mul_pd(_mm_load_pd(a), xc));
+                    s1 = _mm_add_pd(s1, _mm_mul_pd(_mm_load_pd(a + 2), xc));
+                    s2 = _mm_add_pd(s2, _mm_mul_pd(_mm_load_pd(a + 4), xc));
+                    s3 = _mm_add_pd(s3, _mm_mul_pd(_mm_load_pd(a + 6), xc));
+                }
+                _mm_store_pd(y2 + 2 * r, s0);
+                _mm_store_pd(y2 + 2 * r + 2, s1);
+                _mm_store_pd(y2 + 2 * r + 4, s2);
+                _mm_store_pd(y2 + 2 * r + 6, s3);
+            }
+            for (; r < rows; ++r)
+            {
+                __m128d s = _mm_setzero_pd();
+                const double* a = a2 + 2 * r;
+                for (int c = 0; c < columns; ++c, a += stride)
+                    s = _mm_add_pd(s, _mm_mul_pd(_mm_load_pd(a), _mm_load_pd(x2 + 2 * c)));
+                _mm_store_pd(y2 + 2 * r, s);
+            }
+#else
+            for (; r < rows; ++r)
+            {
+                double s0 = 0.0, s1 = 0.0;
+                const double* a = a2 + 2 * r;
+                for (int c = 0; c < columns; ++c, a += stride)
+                {
+                    s0 += a[0] * x2[2 * c];
+                    s1 += a[1] * x2[2 * c + 1];
+                }
+                y2[2 * r] = s0;
+                y2[2 * r + 1] = s1;
+            }
+#endif
+        }
+
+        alignas(16) std::array<double, 2 * C::maxColumns * C::maxDevicePorts> devices {};
+        alignas(16) std::array<double, 2 * C::maxColumns * C::maxPorts> capacitors {};
+        alignas(16) std::array<double, 2 * C::maxColumns * C::maxProbeSlots> probes {};
+        const C* laneA = nullptr;
+        const C* laneB = nullptr;
+        int stampA = -1, stampB = -1, capacitorRows = 0, probeRows = 0;
+        bool sameShape = false;
     };
 }

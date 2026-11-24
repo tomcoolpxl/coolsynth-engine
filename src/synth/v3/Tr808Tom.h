@@ -189,6 +189,34 @@ namespace coolsynth::synth::v3
         /** One sample, the pink noise bus at its volts; returns the output in volts. */
         double process(double pinkNoise) noexcept
         {
+            if (frontWillRun())
+            {
+                front.process();
+                frontRan();
+            }
+            if (gateWillRun(pinkNoise))
+            {
+                gate.process();
+                gateRan();
+            }
+            resonatorWillRun();
+            resonator.process();
+            mixerWillRun();
+            mixer.process();
+            return mixer.probe(mixerOut);
+        }
+
+        /** Two toms' stages side by side, as Tr808Tom::process gives each alone (CoolSynth's D347): each of the four
+            circuits in a CircuitPair's lanes when both run it this sample. */
+        struct Lanes;
+        static void processPair(Tr808Tom& a, Tr808Tom& b, double pinkNoise, Lanes& lanes, double& outA, double& outB) noexcept;
+
+    private:
+        // ---- One sample, stage by stage (process) ---------------------------------------------------------------
+
+        /** The trigger's drive this sample; true when the front runs, its inputs set. */
+        bool frontWillRun() noexcept
+        {
             // Q32's base, as the bass drum's (Tr808BassDrum::process): the step half a sample into the hit.
             double drive = 0.0;
             if (triggerSample >= 0)
@@ -207,33 +235,49 @@ namespace coolsynth::synth::v3
             // The front and the gate rest once the hit has passed through them and the envelope has let go of Q52
             // (their outputs still), so the tail costs only the resonator and the mixer; a new hit wakes them.
             const bool active = triggerSample >= 0;
-            if (active || ! frontResting)
-            {
-                front.setInput(frontDrive, drive);
-                front.setSource(r218Front, lastGateBase);
-                front.process();
-                const double e = front.probe(frontEnvelope);
-                stillSamples = std::abs(e - lastEnvelope) < 1.0e-6 ? stillSamples + 1 : 0;
-                lastEnvelope = e;
-                frontResting = ! active && std::abs(front.probe(frontPulse)) < 1.0e-9 && std::abs(front.probe(frontTrigger)) < 1.0e-6
-                               && stillSamples > static_cast<int>(0.005 * sampleRate);
-            }
-            if (active || ! frontResting || ! gateResting)
-            {
-                gate.setInput(gateEnvelope, lastEnvelope);
-                gate.setInput(gateNoise, pinkNoise);
-                gate.process();
-                lastGateBase = gate.probe(gateBase);
-                lastNoise = gate.probe(gateOut);
-                gateResting = frontResting && std::abs(lastNoise) < 1.0e-7;
-            }
-            resonator.setInput(resonatorIn, frontResting ? 0.0 : front.probe(frontPulse));
-            resonator.process();
+            if (! active && frontResting)
+                return false;
+            front.setInput(frontDrive, drive);
+            front.setSource(r218Front, lastGateBase);
+            return true;
+        }
+
+        void frontRan() noexcept
+        {
+            const bool active = triggerSample >= 0;
+            const double e = front.probe(frontEnvelope);
+            stillSamples = std::abs(e - lastEnvelope) < 1.0e-6 ? stillSamples + 1 : 0;
+            lastEnvelope = e;
+            frontResting = ! active && std::abs(front.probe(frontPulse)) < 1.0e-9 && std::abs(front.probe(frontTrigger)) < 1.0e-6
+                           && stillSamples > static_cast<int>(0.005 * sampleRate);
+        }
+
+        bool gateWillRun(double pinkNoise) noexcept
+        {
+            const bool active = triggerSample >= 0;
+            if (! active && frontResting && gateResting)
+                return false;
+            gate.setInput(gateEnvelope, lastEnvelope);
+            gate.setInput(gateNoise, pinkNoise);
+            return true;
+        }
+
+        void gateRan() noexcept
+        {
+            lastGateBase = gate.probe(gateBase);
+            lastNoise = gate.probe(gateOut);
+            gateResting = frontResting && std::abs(lastNoise) < 1.0e-7;
+        }
+
+        void resonatorWillRun() noexcept { resonator.setInput(resonatorIn, frontResting ? 0.0 : front.probe(frontPulse)); }
+
+        void mixerWillRun() noexcept
+        {
             mixer.setInput(mixerTone, resonator.probe(resonatorOut));
             mixer.setInput(mixerNoise, gateResting ? 0.0 : lastNoise);
-            mixer.process();
-            return mixer.probe(mixerOut);
         }
+
+    public:
 
         // ---- Its circuit as it runs, for a panel that draws it (CoolSynth's D317) ---------------------------------
         // The node voltages and part currents its ngspice recording names (CoolSynth808's resources/lid, the low pair's
@@ -554,5 +598,52 @@ namespace coolsynth::synth::v3
         int gateEnvelope = 0, gateNoise = 0, gateSupply = 0, gateBase = 0, gateOut = 0, r232Gate = 0;
         int resonatorIn = 0, resonatorMiddle = 0, resonatorOut = 0, ctomPort = 0, cintomPort = 0, rvb = 0, rva = 0;
         int mixerTone = 0, mixerNoise = 0, mixerOut = 0, r232Mixer = 0, vr10 = 0;
+
+    public:
+        /** The four stages' pairs, for two toms at a time (processPair): their matrices side by side. */
+        struct Lanes
+        {
+            wdf::CircuitPair<decltype(front)> front;
+            wdf::CircuitPair<decltype(gate)> gate;
+            wdf::CircuitPair<decltype(resonator)> resonator;
+            wdf::CircuitPair<decltype(mixer)> mixer;
+        };
     };
+
+    inline void Tr808Tom::processPair(Tr808Tom& a, Tr808Tom& b, double pinkNoise, Lanes& lanes, double& outA, double& outB) noexcept
+    {
+        // Stage by stage, as each tom's process: a stage both run goes in the lanes, one only one runs alone.
+        const bool frontA = a.frontWillRun(), frontB = b.frontWillRun();
+        if (frontA && frontB)
+            lanes.front.process(a.front, b.front);
+        else if (frontA)
+            a.front.process();
+        else if (frontB)
+            b.front.process();
+        if (frontA)
+            a.frontRan();
+        if (frontB)
+            b.frontRan();
+
+        const bool gateA = a.gateWillRun(pinkNoise), gateB = b.gateWillRun(pinkNoise);
+        if (gateA && gateB)
+            lanes.gate.process(a.gate, b.gate);
+        else if (gateA)
+            a.gate.process();
+        else if (gateB)
+            b.gate.process();
+        if (gateA)
+            a.gateRan();
+        if (gateB)
+            b.gateRan();
+
+        a.resonatorWillRun();
+        b.resonatorWillRun();
+        lanes.resonator.process(a.resonator, b.resonator);
+        a.mixerWillRun();
+        b.mixerWillRun();
+        lanes.mixer.process(a.mixer, b.mixer);
+        outA = a.mixer.probe(a.mixerOut);
+        outB = b.mixer.probe(b.mixerOut);
+    }
 }
