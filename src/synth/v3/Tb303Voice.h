@@ -51,11 +51,25 @@ namespace coolsynth::synth::v3
             bool square = false;
         };
 
+        /** The trimmers and the part known to vary, as set at the factory or by a player: TM3 the cutoff's range, TM4
+            the tune, TM5 the scale's width, C11 the shaper's capacitor. Their defaults are the fitted unit's above. */
+        struct Trimmers
+        {
+            double tm3 = Tb303Voice::tm3, tm4 = Tb303Voice::tm4, tm5 = Tb303Voice::tm5, c11 = Tb303Voice::c11;
+        };
+
+        void setTrimmers(const Trimmers& t) noexcept
+        {
+            trim = t;
+            setKnobs(knobs);
+        }
+        [[nodiscard]] const Trimmers& trimmers() const noexcept { return trim; }
+
         void setKnobs(const Knobs& k) noexcept
         {
             knobs = k;
-            osc->setTrimmers(tm4, tm5, k.tuning, c11);
-            filter->setKnobs(k.cutoff, k.resonance, k.envMod, tm3);
+            osc->setTrimmers(trim.tm4, trim.tm5, k.tuning, trim.c11);
+            filter->setKnobs(k.cutoff, k.resonance, k.envMod, trim.tm3);
             env->setKnobs(k.decay, k.accent);
         }
 
@@ -107,6 +121,7 @@ namespace coolsynth::synth::v3
         std::unique_ptr<Tb303Envelope> env;
         std::unique_ptr<Tb303Vca> vca;
         Knobs knobs;
+        Trimmers trim;
         double wave = 8.0, out = 0.0;
     };
 }
