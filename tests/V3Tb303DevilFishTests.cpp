@@ -343,6 +343,37 @@ public:
             expectGreaterThan(with, without * 1.1, "heavy Filter FM brightens the note");
         }
 
+        beginTest("woken_from_rest_it_plays_as_settled_whole");
+        {
+            // CoolSynth's D340: a host settles the voice whole while it rests and only wakes it for the next note (the
+            // oscillator at the note's pitch). The note must come out as from a whole settle at that pitch.
+            for (bool fish : { false, true })
+            {
+                Tb303Voice::Knobs knobs;
+                knobs.cutoff = 0.5;
+                knobs.resonance = 0.8;
+                knobs.envMod = 0.6;
+                auto whole = makeVoice(fish, knobs);
+                whole->settle(2.5);
+                auto woken = makeVoice(fish, knobs);
+                woken->settle(2.0); // at rest at the last note's pitch
+                woken->wake(2.5);
+                const auto note = [](double t) { return Step { 2.5, t > 0.01 && t < 0.2, t > 0.01 && t < 0.2, false }; };
+                const auto a = render(*whole, 0.3, note);
+                const auto b = render(*woken, 0.3, note);
+                expect(a.converged && b.converged);
+                double peak = 0.0, worst = 0.0;
+                for (std::size_t i = 0; i < a.out.size(); ++i)
+                {
+                    peak = std::max(peak, std::abs(a.out[i]));
+                    worst = std::max(worst, std::abs(a.out[i] - b.out[i]));
+                }
+                logMessage(juce::String(fish ? "Devil Fish" : "stock") + ": woken against settled whole, the largest difference "
+                           + juce::String(100.0 * worst / peak, 3) + " % of the note's peak");
+                expectLessThan(worst / peak, 0.01, "within 1 % of the note's peak at every sample");
+            }
+        }
+
         beginTest("soft_attack");
         {
             double first[2] {};

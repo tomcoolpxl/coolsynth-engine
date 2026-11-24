@@ -166,6 +166,19 @@ namespace coolsynth::synth::v3
             gateBefore = false;
         }
 
+        /** Back from rest at this note, the rest of the circuit as settle() left it: only the oscillator settles at
+            the new pitch (0.02 ms against the whole voice's 1 ms, most of it the filter's). A host that rests the
+            voice settles it whole while resting, when that costs nothing, and wakes it with this (CoolSynth's D340):
+            the first block of a note then carries only the attack's own work. */
+        void wake(double noteVolts) noexcept
+        {
+            osc->setSlide(false);
+            osc->settle(noteVolts, (Tb303Oscillator::top - 8.0) / (Tb303Oscillator::top - 5.36));
+            fmHigh = fmLast = mufflerLow = 0.0;
+            attack = 1.0;
+            gateBefore = false;
+        }
+
         /** One sample: the note's volts, the gate, the accent and the slide as the sequencer sets them. */
         double process(double noteVolts, bool gate, bool accent, bool slide) noexcept
         {
