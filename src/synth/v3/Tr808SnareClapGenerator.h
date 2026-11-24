@@ -124,6 +124,7 @@ namespace coolsynth::synth::v3
             snare.rest();
             clap.rest();
             capture.stop(); // a capture under way ends with the reset (D317)
+            board.stop();
             pending.fill(false);
             pendingOther.fill(false);
             pendingVelocity.fill(1.0f);
@@ -202,6 +203,7 @@ namespace coolsynth::synth::v3
                             snare.rest(); // rung down: its next hit starts from rest
                         snare.trigger(volts);
                         capture.begin<Tr808Snare>(params.watch, CircuitWatch::snare, snareDrum); // D318
+                        board.hit(params.watch, CircuitWatch::snare, snare); // the board's nodes (D320)
                     }
                     else
                     {
@@ -211,6 +213,7 @@ namespace coolsynth::synth::v3
                         clap.trigger(volts);
                         if (! pendingOther[i]) // the clap's sheet; not the maracas
                             capture.begin<Tr808Clap>(params.watch, CircuitWatch::clap, clapPair);
+                        board.hit(params.watch, CircuitWatch::clap, clap);
                     }
                     running[i] = true;
                     shedding[i] = false;
@@ -235,12 +238,14 @@ namespace coolsynth::synth::v3
                         y = snare.process(white);
                         if (capture.instrument() == snareDrum)
                             capture.after(snare, sampleRate);
+                        board.after(params.watch, CircuitWatch::snare, snare, sampleRate);
                     }
                     else
                     {
                         y = clap.process(white);
                         if (capture.instrument() == clapPair)
                             capture.after(clap, sampleRate);
+                        board.after(params.watch, CircuitWatch::clap, clap, sampleRate);
                     }
                     y *= circuitVoltsToLevel;
                     if (shedding[i])
@@ -389,6 +394,7 @@ namespace coolsynth::synth::v3
         Tr808Snare snare;
         Tr808Clap clap;
         CircuitCapture capture; // a hit's circuit captured for a panel (D317)
+        BoardFeed board;        // and every instrument's board nodes (D320)
         std::array<bool, instrumentCount> pending {}, pendingOther {}, running {};
         std::array<float, instrumentCount> pendingVelocity {};
         std::array<double, instrumentCount> level {}, sinceHit {};

@@ -132,6 +132,7 @@ namespace coolsynth::synth::v3
             pendingVelocity.fill(1.0f);
             running.fill(false);
             capture.stop(); // a capture under way ends with the reset (D317)
+            board.stop();
             level.fill(0.0);
             shedding.fill(false);
             shedGain.fill(1.0);
@@ -204,6 +205,7 @@ namespace coolsynth::synth::v3
                         bass.trigger(volts);
                         // A panel watching the bass drum's circuit captures this hit (CoolSynth's D317).
                         capture.begin<Tr808BassDrum>(params.watch, CircuitWatch::bassDrum, bassDrum);
+                        board.hit(params.watch, CircuitWatch::bassDrum, bass); // the board's nodes (D320)
                     }
                     else if (k == rimPair)
                     {
@@ -211,6 +213,7 @@ namespace coolsynth::synth::v3
                             rim.setClaves(pendingOther[i]);
                         rim.trigger(volts);
                         capture.begin<Tr808RimShot>(params.watch, CircuitWatch::rimShot, rimPair);
+                        board.hit(params.watch, CircuitWatch::rimShot, rim);
                     }
                     else
                     {
@@ -219,6 +222,7 @@ namespace coolsynth::synth::v3
                             t.setConga(pendingOther[i]);
                         t.trigger(volts);
                         capture.begin<Tr808Tom>(params.watch, CircuitWatch::lowTom + (k - lowPair), k);
+                        board.hit(params.watch, CircuitWatch::lowTom + (k - lowPair), t);
                     }
                     running[i] = true;
                     shedding[i] = false;
@@ -243,18 +247,21 @@ namespace coolsynth::synth::v3
                         y = bass.process();
                         if (capture.instrument() == bassDrum)
                             capture.after(bass, sampleRate);
+                        board.after(params.watch, CircuitWatch::bassDrum, bass, sampleRate);
                     }
                     else if (k == rimPair)
                     {
                         y = rim.process();
                         if (capture.instrument() == rimPair)
                             capture.after(rim, sampleRate);
+                        board.after(params.watch, CircuitWatch::rimShot, rim, sampleRate);
                     }
                     else
                     {
                         y = toms[i - 1].process(pink);
                         if (capture.instrument() == k)
                             capture.after(toms[i - 1], sampleRate);
+                        board.after(params.watch, CircuitWatch::lowTom + (k - lowPair), toms[i - 1], sampleRate);
                     }
                     y *= circuitVoltsToLevel;
                     if (shedding[i])
@@ -431,6 +438,7 @@ namespace coolsynth::synth::v3
         Tr808RimShot rim;
         std::array<bool, instrumentCount> pending {}, pendingOther {}, running {};
         CircuitCapture capture; // a hit's circuit captured for a panel (D317)
+        BoardFeed board;        // and every instrument's board nodes (D320)
         std::array<float, instrumentCount> pendingVelocity {};
         std::array<double, instrumentCount> level {}, sinceHit {};
         std::array<bool, instrumentCount> shedding {}; // the overload's emergency fades it out (D258)

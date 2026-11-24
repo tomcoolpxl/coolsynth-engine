@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <string_view>
 
 /*
     What the 808's circuits are doing, for a panel to show as they play (CoolSynth's D313): each instrument's level,
@@ -88,8 +89,76 @@ namespace coolsynth::synth::v3
         [[nodiscard]] float capturedTime(int index) const noexcept { return times[static_cast<std::size_t>(index)]; }
         [[nodiscard]] float captured(int index, int series) const noexcept { return values[static_cast<std::size_t>(index)][static_cast<std::size_t>(series)]; }
 
+        // ---- Every drum's board nodes as it plays (CoolSynth's D320) ----------------------------------------------
+        // While a panel shows the whole board (the lid lifted), each instrument's generator reports, after each hit
+        // (every 1/24 ms for 8 ms, then every quarter of a millisecond), how far a few of its nodes are from their rest:
+        // those the whole board's sheet and the lifted lid stand for (the trigger, the envelopes, the core, the
+        // output). The rest is the interface's, from the recordings (a circuit struck from rest has computed no
+        // sample yet). The largest swing since the interface last took it is kept, with its sign.
+        static constexpr int boardSlots = 9;
+        /** Each instrument's board nodes, as its ngspice recording names them (empty past its last). */
+        static constexpr std::array<std::array<std::string_view, boardSlots>, lightCount> boardNodes { {
+            { "trig", "npulse", "nout", "vout" },                                    // bass drum
+            { "vt", "nev", "nc52", "np", "no1", "vout" },                            // low tom
+            { "vt", "nev", "nc52", "np", "no1", "vout" },                            // mid tom
+            { "vt", "nev", "nc52", "np", "no1", "vout" },                            // high tom
+            { "vt", "np21", "no21", "np20", "no20a", "ns", "nenv", "nf", "vout" },   // rim shot
+            { "vt", "ne47", "nc48", "np1", "no1", "np2", "no2", "vout" },            // snare
+            { "vt", "n144", "np8", "n139", "nc70", "vout" },                         // clap
+            { "ncb5", "ncbe", "nc15", "nc14", "n6ap" },                              // cowbell
+            { "ncy6", "nj", "nc16", "nl", "nc17", "nv", "nc18", "vcy" },             // cymbal
+            { "noh7", "ne1", "nc27", "voh" },                                        // open hat
+            { "nch8", "nce", "nc30", "vch" } } };                                    // closed hat
+
+        /** The interface: whether the board is shown (the generators report nothing while it is not). */
+        void watchBoard(bool on) noexcept { boardOn.store(on, std::memory_order_release); }
+        [[nodiscard]] bool boardWatched() const noexcept { return boardOn.load(std::memory_order_acquire); }
+
+        /** The interface, once: a node's rest (volts), from its recording. */
+        void setBoardRest(int light, int slot, float volts) noexcept
+        {
+            if (light >= 0 && light < lightCount && slot >= 0 && slot < boardSlots)
+                boardRest[static_cast<std::size_t>(light)][static_cast<std::size_t>(slot)].store(volts, std::memory_order_relaxed);
+        }
+        [[nodiscard]] float boardRestOf(int light, int slot) const noexcept
+        {
+            return boardRest[static_cast<std::size_t>(light)][static_cast<std::size_t>(slot)].load(std::memory_order_relaxed);
+        }
+
+        /** The audio thread: an instrument struck. */
+        void boardHit(int light) noexcept
+        {
+            if (light >= 0 && light < lightCount)
+                boardHits[static_cast<std::size_t>(light)].fetch_add(1, std::memory_order_acq_rel);
+        }
+        /** The audio thread: a node's swing from its rest now; the largest since the last take is kept. */
+        void boardSwing(int light, int slot, float swing) noexcept
+        {
+            auto& s = board[static_cast<std::size_t>(light)][static_cast<std::size_t>(slot)];
+            float seen = s.load(std::memory_order_relaxed);
+            while (std::abs(swing) > std::abs(seen) && ! s.compare_exchange_weak(seen, swing, std::memory_order_relaxed))
+            {
+            }
+        }
+
+        /** The interface: how many times the instrument was struck while the board was shown. */
+        [[nodiscard]] unsigned int boardHitCount(int light) const noexcept
+        {
+            return light < 0 || light >= lightCount ? 0u : boardHits[static_cast<std::size_t>(light)].load(std::memory_order_acquire);
+        }
+        /** The interface: a node's largest swing (signed, volts) since the last take, and a fresh start. */
+        [[nodiscard]] float takeBoardSwing(int light, int slot) noexcept
+        {
+            if (light < 0 || light >= lightCount || slot < 0 || slot >= boardSlots)
+                return 0.0f;
+            return board[static_cast<std::size_t>(light)][static_cast<std::size_t>(slot)].exchange(0.0f, std::memory_order_relaxed);
+        }
+
     private:
         std::array<std::atomic<float>, lightCount> lights {};
+        std::atomic<bool> boardOn { false };
+        std::array<std::atomic<unsigned int>, lightCount> boardHits {};
+        std::array<std::array<std::atomic<float>, boardSlots>, lightCount> board {}, boardRest {};
         std::atomic<unsigned int> reports { 0 };
         std::atomic<int> watched { -1 }, frames { 0 };
         std::atomic<unsigned int> hits { 0 };
@@ -154,5 +223,89 @@ namespace coolsynth::synth::v3
         CircuitWatch* into = nullptr;
         int which = -1, frame = 0;
         long sample = 0;
+    };
+
+    /**
+        A generator's feed of its instruments' board nodes into a watch (CoolSynth's D320): after each of a struck
+        instrument's samples, every 1/24 ms for 8 ms (the recordings' grid, short pulses and all) and then every quarter
+        of a millisecond, its nodes' swing from their rest, for 4 s. The instrument class gives liveNames, liveCount and
+        tap(float*); the nodes are found in its names once, when the code is compiled.
+    */
+    class BoardFeed final
+    {
+    public:
+        /** At a hit of the instrument shown as `light`. */
+        template <class Circuit>
+        void hit(CircuitWatch* watch, int light, const Circuit& circuit) noexcept
+        {
+            auto& s = state[static_cast<std::size_t>(light)];
+            s.on = watch != nullptr && watch->boardWatched();
+            if (! s.on)
+                return;
+            s.sample = 0;
+            watch->boardHit(light);
+        }
+        /** After a sample of the instrument shown as `light`. */
+        template <class Circuit>
+        void after(CircuitWatch* watch, int light, const Circuit& circuit, double sampleRate) noexcept
+        {
+            auto& s = state[static_cast<std::size_t>(light)];
+            if (! s.on || watch == nullptr)
+                return;
+            const bool early = static_cast<double>(s.sample) < 0.008 * sampleRate;
+            const long stride = std::max<long>(1, std::lround((early ? 1.0 / 24000.0 : 0.00025) * sampleRate));
+            if (s.sample++ % stride != 0)
+                return;
+            if (static_cast<double>(s.sample) > 4.0 * sampleRate || ! watch->boardWatched())
+            {
+                s.on = false;
+                return;
+            }
+            std::array<float, CircuitWatch::boardSlots> now {};
+            read<Circuit>(light, circuit, now);
+            for (int k = 0; k < CircuitWatch::boardSlots; ++k)
+                if (index<Circuit>[static_cast<std::size_t>(light)][static_cast<std::size_t>(k)] >= 0)
+                    watch->boardSwing(light, k, now[static_cast<std::size_t>(k)] - watch->boardRestOf(light, k));
+        }
+        void stop() noexcept
+        {
+            for (auto& s : state)
+                s.on = false;
+        }
+
+    private:
+        struct State { bool on = false; long sample = 0; };
+        std::array<State, CircuitWatch::lightCount> state {};
+
+        /** Where each instrument's board nodes sit in a circuit's names (-1 where it has none). */
+        template <class Circuit>
+        static constexpr auto index = []
+        {
+            std::array<std::array<int, CircuitWatch::boardSlots>, CircuitWatch::lightCount> t {};
+            for (std::size_t l = 0; l < t.size(); ++l)
+                for (std::size_t k = 0; k < t[l].size(); ++k)
+                {
+                    t[l][k] = -1;
+                    const auto name = CircuitWatch::boardNodes[l][k];
+                    if (name.empty())
+                        continue;
+                    for (int i = 0; i < Circuit::liveCount; ++i)
+                        if (std::string_view(Circuit::liveNames[static_cast<std::size_t>(i)]) == name)
+                            t[l][k] = i;
+                }
+            return t;
+        }();
+
+        template <class Circuit>
+        static void read(int light, const Circuit& circuit, std::array<float, CircuitWatch::boardSlots>& out) noexcept
+        {
+            std::array<float, CircuitWatch::captureSeries> all {};
+            circuit.tap(all.data());
+            for (std::size_t k = 0; k < out.size(); ++k)
+            {
+                const int i = index<Circuit>[static_cast<std::size_t>(light)][k];
+                out[k] = i >= 0 ? all[static_cast<std::size_t>(i)] : 0.0f;
+            }
+        }
     };
 }

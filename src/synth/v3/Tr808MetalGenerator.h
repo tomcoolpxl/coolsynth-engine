@@ -126,6 +126,7 @@ namespace coolsynth::synth::v3
             bankRunning = false;
             startPending = false;
             capture.stop(); // a capture under way ends with the reset (D317)
+            board.stop();
             ring.fill(0.0f);
             cursor = 0;
             std::fill(signalTrack.begin(), signalTrack.end(), 0.0f);
@@ -229,6 +230,13 @@ namespace coolsynth::synth::v3
                     else if (k == openHat)
                         capture.begin<Tr808Hats>(params.watch, CircuitWatch::openHat, openHat);
                     capture.begin<Tr808MetalBank>(params.watch, CircuitWatch::metalBankSheet, bankSheet);
+                    // the board's nodes (D320): the hats' two lights share their circuit
+                    if (k == cowbell)
+                        board.hit(params.watch, CircuitWatch::cowbell, bell);
+                    else if (k == cymbal)
+                        board.hit(params.watch, CircuitWatch::cymbal, cymbalCircuit);
+                    else
+                        board.hit(params.watch, k == openHat ? CircuitWatch::openHat : CircuitWatch::closedHat, hats);
                     running[i] = true;
                     shedding[i] = false;
                     shedGain[i] = 1.0;
@@ -280,6 +288,14 @@ namespace coolsynth::synth::v3
                             running[i] = false; // rung down: it rests until its next hit
                         sum += y;
                     }
+                    if (running[cowbell])
+                        board.after(params.watch, CircuitWatch::cowbell, bell, sampleRate);
+                    if (running[cymbal])
+                        board.after(params.watch, CircuitWatch::cymbal, cymbalCircuit, sampleRate);
+                    if (running[openHat])
+                        board.after(params.watch, CircuitWatch::openHat, hats, sampleRate);
+                    if (running[closedHat])
+                        board.after(params.watch, CircuitWatch::closedHat, hats, sampleRate);
                     switch (capture.instrument())
                     {
                         case cowbell: capture.after(bell, sampleRate); break;
@@ -417,6 +433,7 @@ namespace coolsynth::synth::v3
         Tr808Hats hats;
         static constexpr int bankSheet = instrumentCount; // the oscillators' sheet, in the capture (D318)
         CircuitCapture capture; // a hit's circuit captured for a panel (D317)
+        BoardFeed board;        // and every instrument's board nodes (D320)
         std::array<bool, instrumentCount> pending {}, running {};
         std::array<float, instrumentCount> pendingVelocity {};
         std::array<double, instrumentCount> level {}, sinceHit {};
