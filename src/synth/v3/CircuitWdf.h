@@ -51,6 +51,11 @@ namespace coolsynth::synth::v3::wdf
         /** An ideal voltage source from a node to ground, set each sample with setInput. */
         int addInput(int node)
         {
+            if (inputCount >= MaxInputs || node < 1 || node > MaxNodes)
+            {
+                overBuilt = true;
+                return 0;
+            }
             inputNode[static_cast<std::size_t>(inputCount)] = node;
             return inputCount++;
         }
@@ -58,14 +63,31 @@ namespace coolsynth::synth::v3::wdf
         /** An ideal op-amp: the voltages at plus and minus equal, any current into out. */
         void addNullor(int plus, int minus, int out)
         {
+            if (nullorCount >= MaxNullors || std::max({ plus, minus, out }) > MaxNodes)
+            {
+                overBuilt = true;
+                return;
+            }
             nullors[static_cast<std::size_t>(nullorCount++)] = { plus, minus, out };
         }
 
         /** A voltage-controlled current source: siemens times (V(plus) - V(minus)) into node out. At most one an op-amp. */
         void addTransconductance(int plus, int minus, int out, double siemens)
         {
+            if (gainCount >= MaxNullors || std::max({ plus, minus, out }) > MaxNodes)
+            {
+                overBuilt = true;
+                return;
+            }
             gains[static_cast<std::size_t>(gainCount++)] = { plus, minus, out, siemens };
         }
+
+        /**
+            False when the circuit was built past its limits (more parts, inputs, op-amps, nonlinear ports or probes
+            than its template allows, or a node past MaxNodes): what did not fit was left out, nothing was written past
+            the end, and the circuit outputs silence. A circuit's test checks it.
+        */
+        [[nodiscard]] bool fitsItsLimits() const noexcept { return ! overBuilt; }
 
         /**
             An op-amp of finite gain-bandwidth, as the SPICE references' single-pole macro (D252): 1 mS into the node
@@ -87,6 +109,11 @@ namespace coolsynth::synth::v3::wdf
         /** A junction diode from anode to cathode (Shockley), its port seen through portOhms. */
         void addDiode(int anode, int cathode, double saturation, double thermal, double portOhms = 1000.0)
         {
+            if (deviceCount >= MaxNonlinear || nonlinearCount + 1 > MaxNonlinear || portCount + 1 > MaxPorts)
+            {
+                overBuilt = true;
+                return;
+            }
             Device& d = devices[static_cast<std::size_t>(deviceCount++)];
             d.isTransistor = false;
             d.saturation = saturation;
@@ -100,8 +127,10 @@ namespace coolsynth::synth::v3::wdf
         /** Two diodes back to back between two nodes (a soft clipper), as one port: Is (e^(v / VT) - e^(-v / VT)). */
         void addDiodePair(int n1, int n2, double saturation, double thermal, double portOhms = 1000.0)
         {
+            const int before = deviceCount;
             addDiode(n1, n2, saturation, thermal, portOhms);
-            devices[static_cast<std::size_t>(deviceCount - 1)].isPair = true;
+            if (deviceCount > before)
+                devices[static_cast<std::size_t>(deviceCount - 1)].isPair = true;
         }
 
         /**
@@ -111,8 +140,10 @@ namespace coolsynth::synth::v3::wdf
         */
         void addClampPair(int n1, int n2, double volts, double saturation, double thermal, double portOhms = 1000.0)
         {
+            const int before = deviceCount;
             addDiodePair(n1, n2, saturation, thermal, portOhms);
-            devices[static_cast<std::size_t>(deviceCount - 1)].offset = volts;
+            if (deviceCount > before)
+                devices[static_cast<std::size_t>(deviceCount - 1)].offset = volts;
         }
 
         /** An NPN transistor (Ebers-Moll, transport form), as two ports: base-emitter and collector-emitter. With
@@ -121,6 +152,11 @@ namespace coolsynth::synth::v3::wdf
         void addTransistor(int collector, int base, int emitter, double saturation, double betaF, double betaR, double thermal,
                            double earlyVolts = 0.0)
         {
+            if (deviceCount >= MaxNonlinear || nonlinearCount + 2 > MaxNonlinear || portCount + 2 > MaxPorts)
+            {
+                overBuilt = true;
+                return;
+            }
             Device& d = devices[static_cast<std::size_t>(deviceCount++)];
             d.isTransistor = true;
             d.inverseEarly = earlyVolts > 0.0 ? 1.0 / earlyVolts : 0.0;
@@ -141,12 +177,19 @@ namespace coolsynth::synth::v3::wdf
         void addPnpTransistor(int collector, int base, int emitter, double saturation, double betaF, double betaR, double thermal,
                               double earlyVolts = 0.0)
         {
+            const int before = deviceCount;
             addTransistor(collector, base, emitter, saturation, betaF, betaR, thermal, earlyVolts);
-            devices[static_cast<std::size_t>(deviceCount - 1)].polarity = -1.0;
+            if (deviceCount > before)
+                devices[static_cast<std::size_t>(deviceCount - 1)].polarity = -1.0;
         }
 
         int addProbe(int node)
         {
+            if (probeCount >= MaxProbes || node < 0 || node > MaxNodes)
+            {
+                overBuilt = true;
+                return 0;
+            }
             probeNode[static_cast<std::size_t>(probeCount)] = node;
             return probeCount++;
         }
@@ -365,7 +408,10 @@ namespace coolsynth::synth::v3::wdf
         [[nodiscard]] long chordStepCount() const noexcept { return chordSteps; }
         [[nodiscard]] long freshStepCount() const noexcept { return freshSteps; }
 
-        [[nodiscard]] double probe(int index) const noexcept { return probes[static_cast<std::size_t>(index)]; }
+        [[nodiscard]] double probe(int index) const noexcept
+        {
+            return index >= 0 && index < probeCount ? probes[static_cast<std::size_t>(index)] : 0.0;
+        }
         [[nodiscard]] double portVoltage(int port) const noexcept
         {
             const auto& p = ports[static_cast<std::size_t>(port)];
@@ -441,6 +487,11 @@ namespace coolsynth::synth::v3::wdf
 
         int addPort(int n1, int n2, Kind kind, double ohms, double farads, double alpha)
         {
+            if (portCount >= MaxPorts || std::max(n1, n2) > MaxNodes || std::min(n1, n2) < 0)
+            {
+                overBuilt = true;
+                return 0;
+            }
             Port& p = ports[static_cast<std::size_t>(portCount)];
             p = Port {};
             p.n1 = n1;
@@ -760,6 +811,11 @@ namespace coolsynth::synth::v3::wdf
 
         void step(int iterationLimit) noexcept
         {
+            if (overBuilt) // built past its limits: silence (fitsItsLimits)
+            {
+                solved = false;
+                return;
+            }
             if (dirty)
                 analyse();
 
@@ -1309,6 +1365,7 @@ namespace coolsynth::synth::v3::wdf
         // The chord method (setJacobianReuse): the kept factors, at most chordLimit of their steps in a sample.
         static constexpr int chordLimit = 3;
         bool reuseJacobian = false, haveFactors = false;
+        bool overBuilt = false; // fitsItsLimits
         long chordSteps = 0, freshSteps = 0;
         std::array<std::array<double, maxDevicePorts>, maxDevicePorts> factors {};
         std::array<int, maxDevicePorts> factorOrder {};

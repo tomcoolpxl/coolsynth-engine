@@ -8,6 +8,9 @@
 #include <vector>
 
 #include "synth/v3/Tb303Filter.h"
+#include "synth/v3/Tb303Oscillator.h"
+
+#include <complex>
 
 /*
     The TB-303 as its circuit (D275, D279) against ngspice renders of the same schematic (tools/tb303/vcf.cir,
@@ -96,6 +99,100 @@ namespace
         const char* file;
         double cutoff, resonance, envMod, envelope, accent, envelope2, accent2, step;
     };
+
+    /** The saw's falling crossings of 8 V, in samples, interpolated (the ramp is smooth there: exact to a small part
+        of a sample). */
+    std::vector<double> sawCrossings(const std::vector<double>& saw, std::size_t from)
+    {
+        std::vector<double> t;
+        for (std::size_t i = std::max<std::size_t>(from, 1); i < saw.size(); ++i)
+            if (saw[i - 1] > 8.0 && saw[i] <= 8.0 && saw[i - 1] - saw[i] < 1.0)
+                t.push_back(static_cast<double>(i - 1) + (saw[i - 1] - 8.0) / (saw[i - 1] - saw[i]));
+        return t;
+    }
+
+    /** Harmonics 1..count in dBV over whole periods from a (the mean taken off). */
+    std::vector<double> harmonicLevels(const std::vector<double>& x, double a, double b, double f0, double rate, int count)
+    {
+        const auto i0 = static_cast<std::size_t>(std::ceil(a));
+        const double periods = std::round((b - a) * f0 / rate);
+        const std::size_t i1 = std::min(x.size(), i0 + static_cast<std::size_t>(std::llround(periods * rate / f0)));
+        double mean = 0.0;
+        for (std::size_t i = i0; i < i1; ++i)
+            mean += x[i];
+        mean /= static_cast<double>(i1 - i0);
+        std::vector<double> out;
+        for (int h = 1; h <= count; ++h)
+        {
+            double re = 0.0, im = 0.0;
+            for (std::size_t i = i0; i < i1; ++i)
+            {
+                const double phase = juce::MathConstants<double>::twoPi * h * f0 * (static_cast<double>(i) / rate);
+                re += (x[i] - mean) * std::cos(phase);
+                im += (x[i] - mean) * std::sin(phase);
+            }
+            out.push_back(20.0 * std::log10(std::max(1.0e-12, 2.0 * std::sqrt(re * re + im * im) / static_cast<double>(i1 - i0))));
+        }
+        return out;
+    }
+
+    /** The strongest component below 20 kHz that is not a harmonic of f0, in dB re the fundamental (a 4-term
+        Blackman-Harris window over the last 2^17 samples). */
+    double strongestAlias(const std::vector<double>& x, double rate, double f0)
+    {
+        std::size_t n = 1u << 17;
+        while (n > x.size())
+            n >>= 1;
+        std::vector<std::complex<double>> a(n);
+        const std::size_t start = x.size() - n;
+        double mean = 0.0;
+        for (std::size_t i = 0; i < n; ++i)
+            mean += x[start + i];
+        mean /= static_cast<double>(n);
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            const double t = juce::MathConstants<double>::twoPi * static_cast<double>(i) / static_cast<double>(n - 1);
+            const double w = 0.35875 - 0.48829 * std::cos(t) + 0.14128 * std::cos(2.0 * t) - 0.01168 * std::cos(3.0 * t);
+            a[i] = (x[start + i] - mean) * w;
+        }
+        for (std::size_t i = 1, j = 0; i < n; ++i) // an in-place radix-2 FFT
+        {
+            std::size_t bit = n >> 1;
+            for (; j & bit; bit >>= 1)
+                j ^= bit;
+            j ^= bit;
+            if (i < j)
+                std::swap(a[i], a[j]);
+        }
+        for (std::size_t len = 2; len <= n; len <<= 1)
+        {
+            const double angle = -juce::MathConstants<double>::twoPi / static_cast<double>(len);
+            const std::complex<double> wl(std::cos(angle), std::sin(angle));
+            for (std::size_t i = 0; i < n; i += len)
+            {
+                std::complex<double> w(1.0);
+                for (std::size_t j = 0; j < len / 2; ++j)
+                {
+                    const auto u = a[i + j], v = a[i + j + len / 2] * w;
+                    a[i + j] = u + v;
+                    a[i + j + len / 2] = u - v;
+                    w *= wl;
+                }
+            }
+        }
+        const double bin = rate / static_cast<double>(n);
+        double fundamental = 0.0, worst = 0.0;
+        for (std::size_t k = 1; k < n / 2 && static_cast<double>(k) * bin <= 20000.0; ++k)
+        {
+            const double h = static_cast<double>(k) * bin / f0, apart = std::abs(h - std::round(h)) * f0 / bin;
+            const double p = std::norm(a[k]);
+            if (std::round(h) == 1.0 && apart <= 6.0)
+                fundamental += p;
+            else if (apart > 6.0)
+                worst = std::max(worst, p);
+        }
+        return 10.0 * std::log10(std::max(1.0e-30, worst * 4.0 / std::max(1.0e-30, fundamental)));
+    }
 }
 
 class V3Tb303CircuitTests final : public juce::UnitTest
@@ -122,6 +219,7 @@ public:
                 }
                 const auto ref = loadReference(file);
                 auto filter = std::make_unique<Tb303Filter>();
+                expect(filter->fitsItsLimits(), "the filter's circuits fit their templates");
                 filter->prepare(ref.rate);
                 filter->setKnobs(c.cutoff, c.resonance, c.envMod, 0.1642);
                 const double freq = 65.406;
@@ -228,6 +326,114 @@ public:
                 logMessage(line);
                 expect(converged, juce::String(c.file) + ": every sample converged");
             }
+        }
+
+        beginTest("the_oscillator_matches_spice");
+        {
+            // tools/tb303/vco.cir at low C, A and high C, and a slide up from A; the trimmers as calibrate.py sets them.
+            struct OscillatorCase
+            {
+                const char* file;
+                double cv, cv2, tcv;
+                bool slide;
+            };
+            const OscillatorCase cases[] = {
+                { "vco_c1.csv", 1.0, 1.0, 1.0, false },
+                { "vco_a2.csv", 2.75, 2.75, 1.0, false },
+                { "vco_c5.csv", 5.0, 5.0, 1.0, false },
+                { "vco_slide.csv", 2.75, 3.75, 0.02, true },
+            };
+            using coolsynth::synth::v3::Tb303Oscillator;
+            for (const auto& c : cases)
+            {
+                const auto file = referenceFolder().getChildFile(c.file);
+                if (! file.existsAsFile())
+                {
+                    expect(false, juce::String("the SPICE reference is missing: ") + c.file);
+                    continue;
+                }
+                const auto ref = loadReference(file);
+                const std::size_t n = ref.size();
+                auto osc = std::make_unique<Tb303Oscillator>();
+                expect(osc->fitsItsLimits(), "the oscillator's circuits fit their templates");
+                osc->prepare(ref.rate);
+                osc->setTrimmers(0.5687, 0.7389, 0.5, 1.0e-6);
+                osc->setSlide(c.slide);
+                osc->settle(c.cv, (Tb303Oscillator::top - 8.0) / (Tb303Oscillator::top - 5.36)); // the render's C33 at 8 V
+                std::vector<double> saw(n), square(n), cv(n);
+                bool converged = true;
+                const auto start = std::chrono::steady_clock::now();
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    saw[i] = osc->process(static_cast<double>(i) / ref.rate > c.tcv ? c.cv2 : c.cv);
+                    square[i] = osc->squareVolts();
+                    cv[i] = osc->cvVolts();
+                    converged = converged && osc->lastSolveConverged();
+                }
+                const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+                expect(converged, juce::String(c.file) + ": every sample converged");
+                const auto& spiceSaw = ref.columns.at("nsaw");
+                const auto& spiceSquare = ref.columns.at("nsq");
+                const auto& spiceCv = ref.columns.at("ncv");
+                double cvError = 0.0;
+                for (std::size_t i = 0; i < n; ++i)
+                    cvError = std::max(cvError, std::abs(cv[i] - spiceCv[i]));
+                expectLessThan(cvError, 2.0e-3, juce::String(c.file) + ": the CV (and the slide) follows SPICE's");
+                juce::String line = juce::String(c.file) + ": CV within " + juce::String(cvError * 1.0e3, 2) + " mV";
+                if (! c.slide) // the slide's pitch moves to the end, so its CV stands for it
+                {
+                    const auto model = sawCrossings(saw, 0), spice = sawCrossings(spiceSaw, 0);
+                    const std::size_t k = std::min(model.size(), spice.size()) - 1;
+                    expect(k >= 3, juce::String(c.file) + ": enough periods");
+                    if (k < 3)
+                        continue;
+                    const double fm = ref.rate * static_cast<double>(k - 1) / (model[k] - model[1]);
+                    const double fs = ref.rate * static_cast<double>(k - 1) / (spice[k] - spice[1]);
+                    const double cents = 1200.0 * std::log2(fm / fs);
+                    expectLessThan(std::abs(cents), 0.5, juce::String(c.file) + ": the pitch");
+                    const std::size_t first = k >= 3 ? k - 3 : 1;
+                    const auto hs = harmonicLevels(saw, model[first], model[k], fm, ref.rate, 10);
+                    const auto hss = harmonicLevels(spiceSaw, spice[first], spice[k], fs, ref.rate, 10);
+                    const auto hq = harmonicLevels(square, model[first], model[k], fm, ref.rate, 10);
+                    const auto hqs = harmonicLevels(spiceSquare, spice[first], spice[k], fs, ref.rate, 10);
+                    double worstSaw = 0.0, worstSquare = 0.0;
+                    for (int h = 0; h < 10; ++h)
+                    {
+                        worstSaw = std::max(worstSaw, std::abs(hs[static_cast<std::size_t>(h)] - hss[static_cast<std::size_t>(h)]));
+                        // A square's weak harmonics (below -25 dB re its first) are judged within 3 dB, the rest 0.5 dB.
+                        const double d = std::abs(hq[static_cast<std::size_t>(h)] - hqs[static_cast<std::size_t>(h)]);
+                        const bool weak = hqs[static_cast<std::size_t>(h)] - hqs[0] < -25.0;
+                        expectLessThan(d, weak ? 3.0 : 0.5, juce::String(c.file) + ": the square's harmonic " + juce::String(h + 1));
+                        worstSquare = std::max(worstSquare, weak ? 0.0 : d);
+                    }
+                    expectLessThan(worstSaw, 0.3, juce::String(c.file) + ": the saw's harmonics 1 to 10");
+                    line << "; pitch " << juce::String(cents, 3) << " cents; harmonics 1 to 10 within " << juce::String(worstSaw, 2)
+                         << " dB (saw), " << juce::String(worstSquare, 2) << " dB (square's strong ones)";
+                }
+                line << " | " << juce::String(1.0e9 * seconds / static_cast<double>(n), 0) << " ns a sample, "
+                     << juce::String(100.0 * seconds * ref.rate / static_cast<double>(n), 1) << " % of real time";
+                logMessage(line);
+            }
+
+            // Aliasing (D290), the user's bar at the 4x shaper: the square's strongest alias below 20 kHz at most -68 dB
+            // re its fundamental at the top note, the saw's at most -85 dB.
+            auto osc = std::make_unique<Tb303Oscillator>();
+            osc->prepare(192000.0);
+            osc->setTrimmers(0.5687, 0.7389, 0.5, 1.0e-6);
+            osc->settle(5.0);
+            std::vector<double> saw(192000 * 2), square(saw.size());
+            for (std::size_t i = 0; i < saw.size(); ++i)
+            {
+                saw[i] = osc->process(5.0);
+                square[i] = osc->squareVolts();
+            }
+            const auto crossings = sawCrossings(saw, saw.size() / 2);
+            const double f0 = 192000.0 * static_cast<double>(crossings.size() - 1) / (crossings.back() - crossings.front());
+            const double sawAlias = strongestAlias(saw, 192000.0, f0), squareAlias = strongestAlias(square, 192000.0, f0);
+            logMessage("high C (" + juce::String(f0, 1) + " Hz): strongest alias below 20 kHz, saw " + juce::String(sawAlias, 1)
+                       + " dB, square " + juce::String(squareAlias, 1) + " dB re the fundamental");
+            expectLessThan(sawAlias, -85.0, "the saw's aliasing at high C");
+            expectLessThan(squareAlias, -68.0, "the square's aliasing at high C");
         }
     }
 };

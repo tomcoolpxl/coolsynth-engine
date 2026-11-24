@@ -60,6 +60,9 @@ namespace coolsynth::synth::v3
             converter.setJacobianReuse(on);
             loop.setJacobianReuse(on);
         }
+        /** False if a circuit was built past its template's limits (CircuitWdf's fitsItsLimits). */
+        [[nodiscard]] bool fitsItsLimits() const noexcept { return converter.fitsItsLimits() && loop.fitsItsLimits(); }
+
         /** The share of the loop's steps that factored afresh. */
         [[nodiscard]] double freshShare() const noexcept
         {
