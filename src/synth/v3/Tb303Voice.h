@@ -107,11 +107,16 @@ namespace coolsynth::synth::v3
         /** RESONANCE's track (VR4, 50k B, two gangs): the share of the pot at a turn of the knob, fitted to Din Sync's
             unit (CoolSynth's D324). Its marks fall on a straight track at about 0.10 to 0.15 (a quarter turn), 0.5,
             0.88 and 1: an S-shaped track, Whittle's "log curve at both ends". t^2 / (t^2 + (1 - t)^2) gives 0.10, 0.5,
-            0.90 and 1; a quarter turn then comes within 1.7 dB of the unit where it was 4.5 dB quiet. */
+            0.90 and 1; a quarter turn then comes within 1.7 dB of the unit where it was 4.5 dB quiet. The unit's
+            loop also falls some 4 % short of the schematic's (Lemus's ro-mono-303 put it at 98 % for the same unit):
+            at full resonance with the cutoff swept to its top, the schematic whistles above 12.8 kHz 12 dB louder
+            than the unit. As a share of the pot, 0.96 brings that within 1 dB, and set E's notes within about 1 dB
+            where they were 2 to 4 dB off; the sets at lower knobs are unchanged. */
+        static constexpr double resonanceLoop = 0.96;
         static double resonanceTrack(double turn) noexcept
         {
             const double t = std::clamp(turn, 0.0, 1.0), u = 1.0 - t;
-            return t * t / (t * t + u * u);
+            return resonanceLoop * t * t / (t * t + u * u);
         }
 
         /** The panel's knobs, each its turn 0..1, and the WAVEFORM switch. */
