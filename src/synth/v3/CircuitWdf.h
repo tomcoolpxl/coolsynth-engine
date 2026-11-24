@@ -26,11 +26,13 @@ namespace coolsynth::synth::v3::wdf
     /** How many root analyses this thread has run, every circuit together: for the cost tests (D262). */
     inline thread_local long analysesOnThisThread = 0;
 
-    /** Limits of one circuit: nodes besides ground, ports, ideal inputs, op-amps, nonlinear ports, probes. */
-    template <int MaxNodes, int MaxPorts, int MaxInputs, int MaxNullors, int MaxNonlinear, int MaxProbes>
+    /** Limits of one circuit: nodes besides ground, ports, ideal inputs, op-amps, nonlinear ports, probes. Tapped:
+        every node's voltage and every port's current can be read at any moment (nodeVoltages, portCurrent: the
+        TB-303's lid, CoolSynth's Under the Lid); it keeps one more row a node from each analysis, the solve as it was. */
+    template <int MaxNodes, int MaxPorts, int MaxInputs, int MaxNullors, int MaxNonlinear, int MaxProbes, bool Tapped = false>
     class Circuit final
     {
-        template <int, int, int, int, int, int>
+        template <int, int, int, int, int, int, bool>
         friend class Circuit; // takeSharedState reads another variant's state
 
     public:
@@ -122,6 +124,7 @@ namespace coolsynth::synth::v3::wdf
             d.port[0] = addPort(anode, cathode, Kind::nonlinear, portOhms, 0.0, 1.0);
             d.slot[0] = nonlinearCount++;
             nonlinearPort[static_cast<std::size_t>(d.slot[0])] = d.port[0];
+            ports[static_cast<std::size_t>(d.port[0])].slot = d.slot[0];
         }
 
         /**
@@ -188,6 +191,8 @@ namespace coolsynth::synth::v3::wdf
             d.slot[1] = nonlinearCount++;
             nonlinearPort[static_cast<std::size_t>(d.slot[0])] = d.port[0];
             nonlinearPort[static_cast<std::size_t>(d.slot[1])] = d.port[1];
+            ports[static_cast<std::size_t>(d.port[0])].slot = d.slot[0];
+            ports[static_cast<std::size_t>(d.port[1])].slot = d.slot[1];
         }
 
         /** A PNP transistor: the NPN's equations with every voltage and current turned round. */
@@ -434,6 +439,82 @@ namespace coolsynth::synth::v3::wdf
             const auto& p = ports[static_cast<std::size_t>(port)];
             return 0.5 * (p.toRoot + p.fromRoot);
         }
+        // ---- The tap (Tapped circuits; the audio thread: no heap, no locks) ----------------------------------------
+
+        /** Every node's voltage as the last sample left it, from that sample's waves: volts[0] ground, volts[n] node n,
+            up to MaxNodes (MaxNodes + 1 values). */
+        void nodeVoltages(double* volts) const noexcept
+        {
+            static_assert(Tapped, "nodeVoltages needs a Tapped circuit");
+            // Column by column: each node's sum its own, so the adds do not wait on one another.
+            const int columns = linearSendingCount + inputCount + nonlinearCount, nodes = tapNodes;
+            const double* x = packed.data();
+            double* __restrict v = volts + 1;
+            for (int node = 0; node <= MaxNodes; ++node)
+                volts[node] = 0.0;
+            for (int c = 0; c < columns; ++c)
+            {
+                const double* __restrict column = toNodes[static_cast<std::size_t>(c)].data();
+                const double xc = x[c];
+                for (int node = 0; node < nodes; ++node)
+                    v[node] += column[node] * xc;
+            }
+        }
+
+        /** The current through a port's element from its n1 to its n2, as the last sample left it: a capacitor's from
+            its waves, (b - a) / 2R; a device port's from the root's solve (a transistor's base port its base current,
+            its collector port its collector current); a resistor's and a source's from the node voltages
+            (nodeVoltages). */
+        [[nodiscard]] double portCurrent(int port, const double* volts) const noexcept
+        {
+            const auto& p = ports[static_cast<std::size_t>(port)];
+            switch (p.kind)
+            {
+                case Kind::capacitor:
+                    return (p.fromRoot - p.toRoot) / (2.0 * p.resistance);
+                case Kind::nonlinear:
+                    return current[static_cast<std::size_t>(p.slot)];
+                case Kind::source: // its volts as the last sample sent them
+                    return (volts[p.n1] - volts[p.n2] - p.toRoot) / p.resistance;
+                case Kind::resistor:
+                    break;
+            }
+            return (volts[p.n1] - volts[p.n2]) / p.resistance;
+        }
+
+        /** What a node's ideal input or op-amp output gives into it: the currents its ports draw from it. */
+        [[nodiscard]] double nodeCurrent(int node, const double* volts) const noexcept
+        {
+            double sum = 0.0;
+            for (int k = 0; k < portCount; ++k)
+            {
+                const auto& p = ports[static_cast<std::size_t>(k)];
+                if (p.n1 == node)
+                    sum += portCurrent(k, volts);
+                else if (p.n2 == node)
+                    sum -= portCurrent(k, volts);
+            }
+            return sum;
+        }
+
+        /** A port as it was built, for checking a tap's map against the circuit: its nodes, its kind ('r' resistor,
+            'c' capacitor, 'v' source, 'n' a device's) and its ohms (farads for a capacitor). */
+        struct PortInfo
+        {
+            int n1 = 0, n2 = 0;
+            char kind = 'r';
+            double value = 0.0;
+        };
+        [[nodiscard]] PortInfo portInfo(int port) const noexcept
+        {
+            if (port < 0 || port >= portCount)
+                return { -1, -1, '?', 0.0 };
+            const auto& p = ports[static_cast<std::size_t>(port)];
+            const char kind = p.kind == Kind::capacitor ? 'c' : p.kind == Kind::source ? 'v' : p.kind == Kind::nonlinear ? 'n' : 'r';
+            return { p.n1, p.n2, kind, p.kind == Kind::capacitor ? p.farads : p.value };
+        }
+        [[nodiscard]] int portTotal() const noexcept { return portCount; }
+
         [[nodiscard]] int lastNewtonSteps() const noexcept { return newtonSteps; }
         /**
             False when the nonlinear ports' currents are tied by the linear part alone (two devices in series with
@@ -468,6 +549,7 @@ namespace coolsynth::synth::v3::wdf
             double toRoot = 0.0;   // the wave from the element into the root (a)
             double fromRoot = 0.0; // the wave from the root into the element (b)
             double alphaState = 0.0; // the alpha transform's last reflected wave
+            int slot = -1;           // a device's port: its place among the nonlinear ports (portCurrent)
         };
 
         struct Nullor
@@ -771,6 +853,16 @@ namespace coolsynth::synth::v3::wdf
                 double* out = toProbes[static_cast<std::size_t>(j)].data();
                 for (int c = 0; c < linear + m; ++c)
                     out[c] = entry(W[j], W[j] + portCount, c);
+            }
+            if constexpr (Tapped) // every node as a probe, for the tap (nodeVoltages): nothing above reads these
+            {
+                for (int c = 0; c < linear + m; ++c)
+                {
+                    double* out = toNodes[static_cast<std::size_t>(c)].data(); // a column: every node's weight
+                    for (int node = 1; node <= MaxNodes; ++node)
+                        out[node - 1] = node <= n ? entry(X[node - 1], X[node - 1] + portCount, c) : 0.0;
+                }
+                tapNodes = n;
             }
             dirty = false;
         }
@@ -1398,6 +1490,8 @@ namespace coolsynth::synth::v3::wdf
         std::array<std::array<double, maxColumns>, (MaxNonlinear > 0 ? MaxNonlinear : 1)> toDevices {};
         std::array<std::array<double, maxColumns>, MaxPorts> toCapacitors {};
         std::array<std::array<double, maxColumns>, MaxProbes> toProbes {};
+        std::array<std::array<double, MaxNodes>, (Tapped ? maxColumns : 0)> toNodes {}; // the tap's, by packed column
+        int tapNodes = 0;                                                               // the nodes it covers
         std::array<int, MaxPorts> sending {}, capacitorPort {};
         int sendingCount = 0, linearSendingCount = 0, capacitorCount = 0;
 

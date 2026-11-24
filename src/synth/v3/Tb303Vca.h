@@ -27,6 +27,7 @@ namespace coolsynth::synth::v3
 {
     class Tb303Vca final
     {
+        friend struct Tb303Lid; // the lid tap reads its circuits and state (Tb303Lid.h)
     public:
         static constexpr double thermal = Tb303Filter::thermal;
         static constexpr double supply = Tb303Filter::supply, reference = Tb303Filter::reference;
@@ -177,8 +178,8 @@ namespace coolsynth::synth::v3
         }
 
         static constexpr double leakOhms = 1.0e9;
-        wdf::Circuit<21, 43, 5, 0, 21, 1> chip;  // 43 ports: 15 parts, 7 leaks, 9 transistors' 18, 3 diodes
-        wdf::Circuit<7, 13, 2, 0, 7, 3> buffer;  // 13 ports: 5 parts, a leak, 3 transistors' 6, 1 diode
+        wdf::Circuit<21, 43, 5, 0, 21, 1, true> chip; // 43 ports: 15 parts, 7 leaks, 9 transistors' 18, 3 diodes
+        wdf::Circuit<7, 13, 2, 0, 7, 3, true> buffer; // 13 ports: 5 parts, a leak, 3 transistors' 6, 1 diode
 
         double baseAmps = 0.0, lastPin6 = 5.333;
         int inSupply = 0, inReference = 0, inFilter = 0, inResonance = 0, inPin1 = 0, sBase = 0, pOut = 0, cC21 = 0;

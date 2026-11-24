@@ -33,6 +33,7 @@ namespace coolsynth::synth::v3
 {
     class Tb303Envelope final
     {
+        friend struct Tb303Lid; // the lid tap reads its circuits and state (Tb303Lid.h)
     public:
         static constexpr double thermal = Tb303Filter::thermal;
         static constexpr double supply = Tb303Filter::supply, reference = Tb303Filter::reference, vq9 = 3.31;
@@ -294,7 +295,7 @@ namespace coolsynth::synth::v3
         static constexpr double leakOhms = 1.0e9;
         // 66 ports: 40 parts (4 leaks, the accent's load) and 26 nonlinear (8 transistors, 12 one-ports: the diodes,
         // D27, Q1A, Q39, three recombination diodes)
-        wdf::Circuit<36, 66, 5, 0, 26, 7> circuit; // a Devil Fish's sustain input its 36th node and 5th input
+        wdf::Circuit<36, 66, 5, 0, 26, 7, true> circuit; // a Devil Fish's sustain input its 36th node and 5th input
 
         double sampleRate = 192000.0, gateVolts = 0.0;
         bool accented = false;

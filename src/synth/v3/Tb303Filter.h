@@ -35,6 +35,7 @@ namespace coolsynth::synth::v3
 {
     class Tb303Filter final
     {
+        friend struct Tb303Lid; // the lid tap reads its circuits and state (Tb303Lid.h)
     public:
         static constexpr double thermal = 0.025865;  // ngspice's at 27 C
         static constexpr double npnSaturation = 39.0e-15, npnBetaF = 416.4, npnBetaR = 0.7371, npnEarly = 74.03;
@@ -350,8 +351,8 @@ namespace coolsynth::synth::v3
             pResWiper = loop.addProbe(27);
         }
 
-        wdf::Circuit<19, 27, 5, 0, 7, 7> converter; // 26 ports, one more in a Devil Fish
-        wdf::Circuit<34, 69, 3, 0, 22, 7> loop; // 67 ports counted from buildLoop, 2 more loaded by the VCA
+        wdf::Circuit<19, 27, 5, 0, 7, 7, true> converter; // 26 ports, one more in a Devil Fish
+        wdf::Circuit<34, 69, 3, 0, 22, 7, true> loop; // 67 ports counted from buildLoop, 2 more loaded by the VCA
 
         double tailAmps = 0.5e-3, collectorAmps = 0.0, lastNe12 = 4.8, lastNe21 = 2.9;
         bool fish = false;

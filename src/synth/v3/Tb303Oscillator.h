@@ -38,6 +38,7 @@ namespace coolsynth::synth::v3
 {
     class Tb303Oscillator final
     {
+        friend struct Tb303Lid; // the lid tap reads its circuits and state (Tb303Lid.h)
     public:
         static constexpr double thermal = Tb303Filter::thermal;
         static constexpr double supply = Tb303Filter::supply, reference = Tb303Filter::reference;
@@ -452,8 +453,8 @@ namespace coolsynth::synth::v3
             shaper.setInput(shaperReference, reference);
         }
 
-        wdf::Circuit<18, 26, 4, 2, 4, 2> pitch;  // 26 ports: 18 parts, Q26's 4, the two op-amps' 2 each
-        wdf::Circuit<7, 10, 2, 0, 2, 2> shaper;  // 10 ports: 8 parts, Q8's 2
+        wdf::Circuit<18, 26, 4, 2, 4, 2, true> pitch; // 26 ports: 18 parts, Q26's 4, the two op-amps' 2 each
+        wdf::Circuit<7, 10, 2, 0, 2, 2, true> shaper; // 10 ports: 8 parts, Q8's 2
 
         double sampleRate = 192000.0;
         double current = 5.0e-6, c33 = 8.0, followerOpen = 8.0, followerOhms = 700.0;
