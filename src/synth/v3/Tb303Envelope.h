@@ -63,6 +63,9 @@ namespace coolsynth::synth::v3
             build();
         }
 
+        /** Where a sample's solve ends (the 303's accuracy, CoolSynth's D349). */
+        void setNewtonTolerance(double volts) noexcept { circuit.setNewtonTolerance(volts); }
+
         /** The Devil Fish's envelopes (CoolSynth's D309), on a Devil Fish only:
                 normalOhms, accentOhms  the main envelope's decay resistance (R138 and the decay pot) on plain and
                                         accented notes: Normal Decay and Accent Decay, where the stock one shorts DECAY

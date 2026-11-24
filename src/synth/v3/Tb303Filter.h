@@ -184,7 +184,7 @@ namespace coolsynth::synth::v3
             return loop.probe(pTp6);
         }
 
-        /** Where a sample's solve ends (CircuitWdf's tolerance, 100 nV by default). */
+        /** Where a sample's solve ends (newtonTolerance from the constructor; the 303's accuracy, CoolSynth's D349). */
         void setNewtonTolerance(double volts) noexcept
         {
             converter.setNewtonTolerance(volts);

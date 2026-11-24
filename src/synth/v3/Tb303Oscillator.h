@@ -63,6 +63,10 @@ namespace coolsynth::synth::v3
             buildShaper();
         }
 
+        /** The square's shaper's tolerance (the 303's accuracy, CoolSynth's D349). The pitch circuit keeps its 10 nV
+            whatever the level: its error drifts the pitch (D345). */
+        void setShaperTolerance(double volts) noexcept { shaper.setNewtonTolerance(volts); }
+
         /** How many times faster than the voice the square's shaper runs (1 to 8), in place of shaperRate's; before
             prepare. */
         void setShaperOversampling(int factor) noexcept

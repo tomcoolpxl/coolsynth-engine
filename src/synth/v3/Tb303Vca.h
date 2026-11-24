@@ -50,6 +50,13 @@ namespace coolsynth::synth::v3
             buildBuffer();
         }
 
+        /** Where a sample's solve ends in the chip and the buffer (the 303's accuracy, CoolSynth's D349). */
+        void setNewtonTolerance(double volts) noexcept
+        {
+            chip.setNewtonTolerance(volts);
+            buffer.setNewtonTolerance(volts);
+        }
+
         /** The chord method (D281), on by default; off solves each sample exactly, for the tests. */
         void setJacobianReuse(bool on) noexcept
         {

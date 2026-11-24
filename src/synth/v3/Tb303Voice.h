@@ -53,6 +53,22 @@ namespace coolsynth::synth::v3
 
         [[nodiscard]] bool isDevilFish() const noexcept { return fish; }
 
+        /** The 303's Lighter accuracy (CoolSynth's D349): every circuit's solve to 1 uV but the oscillator's pitch,
+            which stays at 10 nV (its error drifts the pitch). Measured on a pattern of both voices: 8 % cheaper,
+            -106.5 dB rms against a circuit solved to 10 pV (Best -128.6), every third-octave band within 0.05 dB of
+            Best. Off: Best. Its Lightest adds the host's rate, which the app sets with prepare. */
+        static constexpr double lighterTolerance = 1.0e-6;
+        void setLighter(bool on) noexcept
+        {
+            const double volts = on ? lighterTolerance : Tb303Filter::newtonTolerance;
+            osc->setShaperTolerance(volts);
+            filter->setNewtonTolerance(volts);
+            env->setNewtonTolerance(volts);
+            vca->setNewtonTolerance(volts);
+            lighter = on;
+        }
+        [[nodiscard]] bool isLighter() const noexcept { return lighter; }
+
         /** The Devil Fish's new knobs (each its turn 0..1) and switches, after Whittle's manual (2019). The defaults
             are where it sounds most like a TB-303 (his page 8), with our own scales where his were not published:
                 overdrive    the oscillator into the filter: none at 0, the stock level at 0.2, 66.6 times at 1
@@ -267,7 +283,7 @@ namespace coolsynth::synth::v3
         Knobs knobs;
         Trimmers trim;
         double wave = 8.0, out = 0.0;
-        bool fish = false;
+        bool fish = false, lighter = false;
         DevilFish fishSettings;
         double voiceRate = rate, attackSeconds = 0.3e-3, attack = 1.0, fmHigh = 0.0, fmLast = 0.0, mufflerLow = 0.0;
         bool gateBefore = false;

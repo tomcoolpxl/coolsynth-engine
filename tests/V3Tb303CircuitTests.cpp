@@ -222,6 +222,42 @@ public:
 
     void runTest() override
     {
+        beginTest("the_lighter_accuracy_stays_close_and_goes_back");
+        {
+            // The 303's Lighter accuracy (CoolSynth's D349): a resonant accented note at Lighter within -80 dB rms of
+            // Best (measured -106.5 dB over a long pattern), and Lighter switched off again the same bytes as Best.
+            using coolsynth::synth::v3::Tb303Voice;
+            const auto render = [](int mode)
+            {
+                auto v = std::make_unique<Tb303Voice>();
+                v->prepare(Tb303Voice::rate);
+                if (mode > 0)
+                    v->setLighter(true);
+                if (mode == 2)
+                    v->setLighter(false);
+                Tb303Voice::Knobs k;
+                k.resonance = 0.8;
+                k.envMod = 0.7;
+                v->setKnobs(k);
+                v->settle(2.0);
+                std::vector<double> out(19200);
+                for (std::size_t i = 0; i < out.size(); ++i)
+                    out[i] = v->process(2.0, i < 12000, true, false);
+                return out;
+            };
+            const auto best = render(0), lighter = render(1), back = render(2);
+            double diff = 0.0, power = 0.0;
+            for (std::size_t i = 0; i < best.size(); ++i)
+            {
+                diff += (lighter[i] - best[i]) * (lighter[i] - best[i]);
+                power += best[i] * best[i];
+            }
+            const double db = 10.0 * std::log10(std::max(1.0e-300, diff) / power);
+            expectLessThan(db, -80.0, "Lighter against Best");
+            expect(back == best, "Lighter switched off is Best");
+            logMessage("Lighter against Best: " + juce::String(db, 1) + " dB rms");
+        }
+
         beginTest("the_filter_matches_spice");
         {
             const FilterCase cases[] = {
