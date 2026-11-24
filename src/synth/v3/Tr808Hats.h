@@ -351,7 +351,7 @@ namespace coolsynth::synth::v3
             openVca.setInput(openGate.band, highBand);
             closedVca.setInput(closedGate.band, highBand);
             setVcaSources();
-            // The 808's Lighter accuracy (CoolSynth's D338): a hat's VCA only while that hat sounds (D255's other way).
+            // The 808's Lighter accuracy (CoolSynth's D339): a hat's VCA only while that hat sounds (D255's other way).
             if (runOpen)
                 openVca.process();
             if (runClosed)
@@ -392,7 +392,7 @@ namespace coolsynth::synth::v3
             return hat == open ? openVca.portVoltage(openGate.coupling) : closedVca.portVoltage(closedGate.coupling);
         }
         [[nodiscard]] bool usingTriggerParts(int hat) const noexcept { return state[static_cast<std::size_t>(hat)].usingFull; }
-        /** Every circuit's Newton tolerance (D259's setting; the 808's Lighter accuracy, CoolSynth's D338). */
+        /** Every circuit's Newton tolerance (D259's setting; the 808's Lighter accuracy, CoolSynth's D339). */
         void setNewtonTolerance(double volts) noexcept
         {
             openFull.setNewtonTolerance(volts);

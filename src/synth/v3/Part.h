@@ -111,7 +111,7 @@ namespace coolsynth::synth::v3
             from 88.2 kHz, where twice would only double the work. */
         [[nodiscard]] static constexpr int oversampleFor(double hostSampleRate) noexcept { return hostSampleRate < 70000.0 ? 2 : 1; }
         // prepare's `oversample` false runs the voices at the host's own rate whatever it is (the 808's Lightest
-        // accuracy, CoolSynth's D338): cheaper, the circuits' highs less exact.
+        // accuracy, CoolSynth's D339): cheaper, the circuits' highs less exact.
         static constexpr float voiceHeadroom = 0.5f;
 
         /** Message thread. Allocates the voice bus for blocks up to maxBlockSize; longer blocks are split. */

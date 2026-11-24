@@ -295,7 +295,7 @@ namespace coolsynth::synth::v3
             return which == 0 ? top.portVoltage(c42) : which == 1 ? middle.portVoltage(c44) : low.portVoltage(c46);
         }
         [[nodiscard]] bool usingTriggerParts() const noexcept { return usingFull; }
-        /** Every circuit's Newton tolerance (D259's setting; the 808's Lighter accuracy, CoolSynth's D338). */
+        /** Every circuit's Newton tolerance (D259's setting; the 808's Lighter accuracy, CoolSynth's D339). */
         void setNewtonTolerance(double volts) noexcept
         {
             full.setNewtonTolerance(volts);

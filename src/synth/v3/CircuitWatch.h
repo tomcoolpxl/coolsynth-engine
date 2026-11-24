@@ -55,7 +55,7 @@ namespace coolsynth::synth::v3
         void hearOnly(std::uint32_t lightMask) noexcept { heard.store(lightMask, std::memory_order_relaxed); }
         [[nodiscard]] std::uint32_t heardMask() const noexcept { return heard.load(std::memory_order_relaxed); }
 
-        // ---- The 808 Metal's Lighter accuracy (CoolSynth's D338) ---------------------------------------------------
+        // ---- The 808 Metal's Lighter accuracy (CoolSynth's D339) ---------------------------------------------------
         // On: its five swing VCAs run only while their drum sounds, and its circuits' Newton ends at 10 uV, not 100 nV.
         void setLighter(bool on) noexcept { lighterOn.store(on, std::memory_order_relaxed); }
         [[nodiscard]] bool lighter() const noexcept { return lighterOn.load(std::memory_order_relaxed); }
