@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <memory>
 
 #include "CircuitWdf.h"
@@ -330,6 +331,146 @@ namespace coolsynth::synth::v3
             return v < 0.0 ? -over : over;
         }
 
+        // ---- Its circuit as it runs, for a panel that draws it (CoolSynth's D317) ---------------------------------
+        // The node voltages and part currents its ngspice recording names (CoolSynth808's resources/lid), each from
+        // the stage the engine models it in: where a part is in two stages (R157, R158 in the front and the
+        // envelope; C39, R161, D52 in the envelope and the resonator) the stage it really sits in. Signs as ngspice's:
+        // a part's current from its first node to its second, a transistor's into its leads. Not here, as the engine
+        // leaves them out: the common trigger's Q31 and R117, R120 and its node nx (the engine drives Q32's base, Q31 gone),
+        // and the select line's R152, R153 and Q39.
+
+        static constexpr int liveCount = 86;
+        static constexpr std::array<const char*, liveCount> liveNames { "nb32", "vcc", "trig", "nb40", "vin", "npulse", "nb41", "nc41", "neg", "nd52", "ntop", "nb43", "nmid", "ninv", "nout", "ninv2", "nvr6", "nfb", "nplus2", "na", "nb", "nc", "nw", "nd", "nb44", "ne44", "vout", "q32.ib", "q32.ic", "q32.ie", "r113.i", "r155.i", "r154.i", "q40.ib", "q40.ic", "q40.ie", "c40.i", "r163.i", "r162.i", "d53.id", "r157.i", "r158.i", "r156.i", "c38.i", "r160.i", "q41.ib", "q41.ic", "q41.ie", "q42.ib", "q42.ic", "q42.ie", "c39.i", "r161.i", "r159.i", "r166.i", "r165.i", "c41.i", "c42.i", "r167.i", "r164.i", "rvr6.i", "c43.i", "r169.i", "r168.i", "r170.i", "q43.ib", "q43.ic", "q43.ie", "d52.id", "r171.i", "r172.i", "rvr5.i", "c45.i", "c47.i", "rvr4t.i", "rvr4b.i", "c49.i", "r177.i", "r176.i", "q44.ib", "q44.ie", "q44.ic", "r173.i", "c48.i", "c50.i", "r174.i" };
+
+        /** The named values after the last sample, in liveNames' order, from the stages' own state (their taps). */
+        void tap(float* out) const noexcept
+        {
+            struct Entry { int stage, kind, index; };
+            static constexpr std::array<Entry, liveCount> entries { {
+              { 0, 0, 2 },
+              { 0, 0, 3 },
+              { 0, 0, 4 },
+              { 0, 0, 5 },
+              { 0, 0, 6 },
+              { 0, 0, 7 },
+              { 1, 0, 2 },
+              { 1, 0, 3 },
+              { 1, 0, 5 },
+              { 2, 0, 3 },
+              { 2, 0, 4 },
+              { 2, 0, 5 },
+              { 2, 0, 6 },
+              { 2, 0, 7 },
+              { 2, 0, 8 },
+              { 2, 0, 9 },
+              { 2, 0, 10 },
+              { 2, 0, 11 },
+              { 2, 0, 12 },
+              { 3, 0, 2 },
+              { 3, 0, 3 },
+              { 3, 0, 4 },
+              { 3, 0, 5 },
+              { 3, 0, 6 },
+              { 3, 0, 7 },
+              { 3, 0, 8 },
+              { 3, 0, 9 },
+              { 0, 1, 1 },
+              { 0, 1, 2 },
+              { 0, 2, 1 },
+              { 0, 1, 3 },
+              { 0, 1, 4 },
+              { 0, 1, 5 },
+              { 0, 1, 6 },
+              { 0, 1, 7 },
+              { 0, 2, 6 },
+              { 0, 1, 8 },
+              { 0, 1, 9 },
+              { 0, 1, 10 },
+              { 0, 1, 11 },
+              { 1, 1, 0 },
+              { 1, 1, 1 },
+              { 1, 1, 2 },
+              { 1, 1, 3 },
+              { 1, 1, 4 },
+              { 1, 1, 8 },
+              { 1, 1, 9 },
+              { 1, 2, 8 },
+              { 1, 1, 10 },
+              { 1, 1, 11 },
+              { 1, 2, 10 },
+              { 2, 1, 0 },
+              { 2, 1, 1 },
+              { 2, 1, 2 },
+              { 2, 1, 3 },
+              { 2, 1, 4 },
+              { 2, 1, 5 },
+              { 2, 1, 6 },
+              { 2, 1, 7 },
+              { 2, 1, 9 },
+              { 2, 1, 10 },
+              { 2, 1, 11 },
+              { 2, 1, 12 },
+              { 2, 1, 13 },
+              { 2, 1, 14 },
+              { 2, 1, 15 },
+              { 2, 1, 16 },
+              { 2, 2, 15 },
+              { 2, 1, 17 },
+              { 3, 1, 0 },
+              { 3, 1, 1 },
+              { 3, 1, 2 },
+              { 3, 1, 3 },
+              { 3, 1, 4 },
+              { 3, 1, 5 },
+              { 3, 1, 6 },
+              { 3, 1, 7 },
+              { 3, 1, 8 },
+              { 3, 1, 9 },
+              { 3, 1, 10 },
+              { 3, 3, 0 },
+              { 3, 4, 0 },
+              { 3, 1, 11 },
+              { 3, 1, 12 },
+              { 3, 1, 13 },
+              { 3, 1, 14 } } };
+            // each stage's node voltages, once
+            std::array<double, 9> frontV {};
+            std::array<double, 7> envelopeV {};
+            std::array<double, 16> resonatorV {};
+            std::array<double, 10> outputV {};
+            front.nodeVoltages(frontV.data());
+            envelope.nodeVoltages(envelopeV.data());
+            if (bent)
+                bentResonator.nodeVoltages(resonatorV.data());
+            else
+                resonator.nodeVoltages(resonatorV.data());
+            output.nodeVoltages(outputV.data());
+            for (int k = 0; k < liveCount; ++k)
+            {
+                const auto& e = entries[static_cast<std::size_t>(k)];
+                const auto read = [&e](const auto& c, const double* v) -> double
+                {
+                    switch (e.kind)
+                    {
+                        case 0: return v[e.index];
+                        case 1: return c.portCurrent(e.index, v);
+                        case 2: return -(c.portCurrent(e.index, v) + c.portCurrent(e.index + 1, v));
+                        case 3: return -(c.portCurrent(11, v) + c.portCurrent(12, v) + c.portCurrent(13, v)); // Q44's emitter: all node 8 sends on
+                        default: return c.portCurrent(11, v) + c.portCurrent(12, v) + c.portCurrent(13, v) - c.portCurrent(10, v); // its collector
+                    }
+                };
+                double value = 0.0;
+                switch (e.stage)
+                {
+                    case 0: value = read(front, frontV.data()); break;
+                    case 1: value = read(envelope, envelopeV.data()); break;
+                    case 2: value = bent ? read(bentResonator, resonatorV.data()) : read(resonator, resonatorV.data()); break;
+                    default: value = read(output, outputV.data()); break;
+                }
+                out[k] = static_cast<float>(value);
+            }
+        }
+
         // The stages' last outputs, for tests against the reference.
         [[nodiscard]] double pulseVolts() const noexcept { return front.probe(frontPulse); }
         [[nodiscard]] double triggerNodeVolts() const noexcept { return front.probe(frontTrigger); }
@@ -481,11 +622,11 @@ namespace coolsynth::synth::v3
             outputOut = output.addProbe(9);
         }
 
-        wdf::Circuit<8, 15, 2, 0, 6, 2> front;
-        wdf::Circuit<6, 13, 2, 0, 5, 1> envelope;
-        wdf::Circuit<12, 18, 2, 2, 3, 1> resonator;
-        wdf::Circuit<15, 24, 3, 2, 6, 1> bentResonator;
-        wdf::Circuit<9, 15, 1, 1, 0, 1> output;
+        wdf::Circuit<8, 15, 2, 0, 6, 2, true> front;         // Tapped: a panel reads its nodes and currents (D317)
+        wdf::Circuit<6, 13, 2, 0, 5, 1, true> envelope;
+        wdf::Circuit<12, 18, 2, 2, 3, 1, true> resonator;
+        wdf::Circuit<15, 24, 3, 2, 6, 1, true> bentResonator;
+        wdf::Circuit<9, 15, 1, 1, 0, 1, true> output;
 
         int frontDrive = 0, frontSupply = 0, frontTrigger = 0, frontPulse = 0;
         int envelopeIn = 0, envelopeSupply = 0, envelopeOut = 0;

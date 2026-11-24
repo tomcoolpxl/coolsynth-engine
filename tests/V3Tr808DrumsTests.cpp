@@ -493,7 +493,8 @@ public:
             // CoolSynth's D313: the panel's lights follow the circuits as they play. The sound is the same, bit for bit,
             // with a watch; the bass drum's light rises with its hit and goes out as it rings down; the others stay dark.
             const auto plain = play(kitOf(), { { 0, 36 } }, 2.0);
-            CircuitWatch watch;
+            auto watchOwner = std::make_unique<CircuitWatch>(); // 800 kB: not on the test runner's stack
+            auto& watch = *watchOwner;
             std::vector<float> light;
             const auto watched = playWatched(kitOf(), { { 0, 36 } }, 2.0, watch, CircuitWatch::bassDrum, light);
             expect(plain == watched, "the sound is the same with a watch");
@@ -508,7 +509,8 @@ public:
             {
                 auto s = kitOf();
                 s.voice.generators[0] = drumsOf({ { Tr808DrumsGenerator::bdDecay, decay } });
-                CircuitWatch w;
+                auto wOwner = std::make_unique<CircuitWatch>();
+                auto& w = *wOwner;
                 std::vector<float> l;
                 playWatched(s, { { 0, 36 } }, 2.0, w, CircuitWatch::bassDrum, l);
                 const float peak = *std::max_element(l.begin(), l.end());
@@ -517,6 +519,50 @@ public:
             const int shortBlocks = longFor(0.1f), longBlocks = longFor(0.9f);
             logMessage("blocks above a tenth of the peak: Decay 0.1 " + juce::String(shortBlocks) + ", Decay 0.9 " + juce::String(longBlocks));
             expectGreaterThan(longBlocks, shortBlocks + 10, "a longer Decay keeps the light longer");
+        }
+
+        beginTest("the_bass_drum_shows_its_circuit_as_it_runs");
+        {
+            // CoolSynth's D317: a panel watching the bass drum gets its circuit, frame by frame over a hit, named as its
+            // ngspice recording is. The sound is the same, bit for bit; the frames hold what the circuit holds: Ohm's
+            // law across R174 and R162, the envelope's swing, the output's.
+            const auto plain = play(kitOf(), { { 0, 36 } }, 0.5);
+            auto watchOwner = std::make_unique<CircuitWatch>(); // 800 kB: not on the test runner's stack
+            auto& watch = *watchOwner;
+            watch.watchCircuit(CircuitWatch::bassDrum);
+            std::vector<float> light;
+            const auto watched = playWatched(kitOf(), { { 0, 36 } }, 0.5, watch, CircuitWatch::bassDrum, light);
+            expect(plain == watched, "the sound is the same while its circuit is captured");
+            expectEquals(watch.capturedSeries(), Tr808BassDrum::liveCount);
+            const int frames = watch.framesCaptured();
+            logMessage("frames captured: " + juce::String(frames));
+            expectGreaterThan(frames, 400);
+            const auto indexOf = [&](const char* name)
+            {
+                for (int s = 0; s < watch.capturedSeries(); ++s)
+                    if (juce::String(watch.capturedName(s)) == name)
+                        return s;
+                return -1;
+            };
+            const int vout = indexOf("vout"), r174 = indexOf("r174.i"), npulse = indexOf("npulse"), r162 = indexOf("r162.i"), neg = indexOf("neg");
+            expect(vout >= 0 && r174 >= 0 && npulse >= 0 && r162 >= 0 && neg >= 0, "the named series are there");
+            double worst = 0.0, envelopeTop = 0.0, outputTop = 0.0;
+            for (int f = 0; f < frames; ++f)
+            {
+                const double v = watch.captured(f, vout), i = watch.captured(f, r174);
+                const double p = watch.captured(f, npulse), ip = watch.captured(f, r162);
+                if (std::isfinite(v) && std::isfinite(i))
+                    worst = std::max(worst, std::abs(i * 100.0e3 - v) / (1.0e-3 + std::abs(v)));
+                if (std::isfinite(p) && std::isfinite(ip))
+                    worst = std::max(worst, std::abs(ip * 4.7e3 - p) / (1.0e-3 + std::abs(p)));
+                envelopeTop = std::max(envelopeTop, static_cast<double>(watch.captured(f, neg)));
+                outputTop = std::max(outputTop, std::abs(v));
+            }
+            logMessage("Ohm's law, worst relative error: " + juce::String(worst, 8) + "; envelope top " + juce::String(envelopeTop, 3)
+                       + " V; output top " + juce::String(outputTop, 3) + " V");
+            expectLessThan(worst, 1.0e-3, "the frames obey Ohm's law");
+            expectGreaterThan(envelopeTop, 8.0, "the envelope rises as the recording's (12.4 V)");
+            expectGreaterThan(outputTop, 0.5, "the output swings");
         }
 
         beginTest("note_offs_change_nothing");
