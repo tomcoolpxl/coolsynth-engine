@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 
@@ -123,6 +124,9 @@ namespace coolsynth::synth::v3
             s.usingFull = false;
             s.triggerSample = -1;
             s.sinceHit = 1 << 30;
+            s.ranFull = false;
+            s.tailSamples = 0;
+            s.c61AtHandover = hat == open ? openFull.portVoltage(c61Open) : closedFull.portVoltage(c61Closed);
             setRestInputs();
             if (hat == open)
                 readOpen(openTail);
@@ -149,6 +153,8 @@ namespace coolsynth::synth::v3
                 s.usingFull = false;
                 s.triggerSample = -1;
                 s.sinceHit = 1 << 30;
+                s.ranFull = false;
+                s.tailSamples = 0;
             }
             openFull.setResistance(openSwitch, switchOff);
             closedFull.setResistance(closedSwitch, switchOff);
@@ -176,6 +182,8 @@ namespace coolsynth::synth::v3
             openFull.settle();
             setClosedSources(closedFull);
             closedFull.settle();
+            state[0].c61AtHandover = openFull.portVoltage(c61Open);
+            state[1].c61AtHandover = closedFull.portVoltage(c61Closed);
             openOutput.setInput(openOut.in, openVca.probe(openGate.outProbe));
             openOutput.settle();
             closedOutput.setInput(closedOut.in, closedVca.probe(closedGate.outProbe));
@@ -319,6 +327,22 @@ namespace coolsynth::synth::v3
                     readClosed(closedTail);
                 }
             }
+            // For the tap (D317): the envelope ran, and in which circuit; its C61 recovers from the handover on.
+            envelopeRunning[static_cast<std::size_t>(hat)] = true;
+            if (handOver)
+            {
+                s.ranFull = true; // this sample from the full circuit, the handover's too
+                s.c61AtHandover = hat == open ? openFull.portVoltage(c61Open) : closedFull.portVoltage(c61Closed);
+                s.tailSamples = 0;
+            }
+            else if (s.usingFull)
+                s.ranFull = true;
+            else
+            {
+                s.ranFull = false;
+                if (s.tailSamples < (1 << 30))
+                    ++s.tailSamples;
+            }
         }
 
         /** Both VCAs, one sample, the high band at these volts (while the bank runs). */
@@ -331,6 +355,9 @@ namespace coolsynth::synth::v3
             closedVca.process();
             openGateVolts = openVca.probe(openGate.gateProbe);
             closedGateVolts = closedVca.probe(closedGate.gateProbe);
+            // For the tap (D317): the envelopes this sample ran (they run before the VCAs), for after it.
+            envelopeRan = envelopeRunning;
+            envelopeRunning = { false, false };
         }
 
         /** A hat's output stage, one sample (after processVcas); returns the output in volts. */
@@ -385,12 +412,187 @@ namespace coolsynth::synth::v3
                    && openVca.isWellPosed() && closedVca.isWellPosed() && openOutput.isWellPosed() && closedOutput.isWellPosed();
         }
 
+        // ---- Their circuit as it runs, for a panel that draws it (CoolSynth's D317) -------------------------------
+        // Both hats on one sheet, as their ngspice recording has them (CoolSynth808's resources/lid: the open hat
+        // struck, then the closed one 150 ms later, which chokes it): a capture starts at the open hat's hit. Each node
+        // voltage and part current from the stage the engine models it in; where a resistor joins two circuits a
+        // sample apart (R144, R142), from the VCA's side, whose source holds the envelope's node of this very sample.
+        // Signs as ngspice's: a part's current from its first node to its second, a transistor's into its leads. Each
+        // envelope from whichever circuit ran last; once a hit has passed and its tail runs (D262), its trigger's parts as
+        // they then stand: the switch, Q21, Q24 and Q28 off, their nodes and currents 0, but for C61 and the collectors on
+        // it, which recover through R136 from where the handover left them. The two envelopes each hold a copy of C61 and
+        // R136, which are one in the circuit: being linear there, its volts are the two copies' droops together, its
+        // currents their sum. The choke's Q23 and R173 from the open envelope while it runs, where Q23 is the whole
+        // transistor; else from the closed one's, where Q23's base is a saturated junction and C62 is empty (no collector
+        // current). Q26 and Q31 are ideal followers and R156 and R154 (to the -15 V supply) are left out: their currents
+        // are worked out from the emitters' volts (which lack the Vbe, so they read some 6 % high), the emitter currents
+        // from all each emitter feeds, the base currents from betaF. Not here, as the engine leaves them out: the data
+        // lines J7 and J8 and the switches Q3 and Q4 with R1, R8, R2, R7 and their collectors (R12 through Q3 and R11
+        // through Q4 are one part each).
+        //
+        // Kinds: 0 a node, 1 a port's current, 2 a transistor's emitter from its base port, 7 the middle of a 2 MOhm bias
+        // (two 1 MOhm in the circuit), 8 a constant (the index its volts), 9 the follower's emitter resistor, 10 its
+        // emitter, 11 its base, 12 its collector, 13 IC2a's output (nv2), 14 C61's node, 15 R136's current, 16 C61's, 17 a
+        // collector on C61 (nc24, nc28), 18 Q23's base, 19 R173's current, 20 Q23's base current, 21 its collector's, 22
+        // its emitter's. Stages: 0 the open envelope (full or tail), 1 the closed one, 2 the open VCA, 3 the closed VCA,
+        // 4 the open output, 5 the closed output; -1 none.
+
+        static constexpr int liveCount = 149;
+        static constexpr std::array<const char*, liveCount> liveNames { "n132", "n148", "n151", "n61", "n66", "n72", "n74", "n7am", "n7ap", "n7bm", "n7bp", "n80", "n81", "n83", "nb22", "nb23", "nb24", "nb26", "nb27", "nb28", "nb29", "nb30", "nb31", "nb7", "nb8", "nc24", "nc27", "nc28", "nc30", "nce", "nch8", "ne1", "ne27", "ne30", "ng2", "nhb", "nhpc", "nhpo", "noenv", "noh7", "nqc", "nv1", "nv2", "nv2c", "ny1", "vcc", "vch", "vee", "voh", "r12.i", "r17.i", "q7.ic", "q7.ib", "q7.ie", "r11.i", "r16.i", "q8.ic", "q8.ib", "q8.ie", "r131.i", "r130.i", "q21.ic", "q21.ib", "q21.ie", "r135.i", "q24.ic", "q24.ib", "q24.ie", "r137.i", "c61.i", "r136.i", "c62.i", "r139.i", "r134.i", "q22.ic", "q22.ib", "q22.ie", "q23.ic", "q23.ib", "q23.ie", "r133.i", "c60.i", "r132.i", "rvr3.i", "r173.i", "r140.i", "q29.ic", "q29.ib", "q29.ie", "r143.i", "r144.i", "c67.i", "r148.i", "r149.i", "q27.ic", "q27.ib", "q27.ie", "r145.i", "c65.i", "d13.id", "c64.i", "c66.i", "r147.i", "c68.i", "r146.i", "q26.ic", "q26.ib", "q26.ie", "r156.i", "c80.i", "r160.i", "r158.i", "r159.i", "c79.i", "c81.i", "rvr7.i", "r13.i", "r141.i", "q28.ic", "q28.ib", "q28.ie", "r138.i", "c63.i", "r142.i", "c71.i", "r151.i", "r150.i", "q30.ic", "q30.ib", "q30.ie", "r152.i", "c70.i", "d14.id", "c69.i", "c72.i", "r153.i", "c73.i", "r155.i", "q31.ic", "q31.ib", "q31.ie", "r154.i", "c74.i", "r162.i", "r157.i", "r161.i", "c82.i", "c83.i", "rvr8.i" };
+        /** How long a capture from the open hat's hit runs, as the recording: milliseconds. */
+        static constexpr double liveMs = 400.0;
+
+        /** The named values after the last sample, in liveNames' order, from the stages' own state (their taps). */
+        void tap(float* out) const noexcept
+        {
+            struct Entry { int stage, kind, index, sign; };
+            static constexpr std::array<Entry, liveCount> entries { {
+              { 0, 0, 6, 1 }, { 2, 7, 2, 1 }, { 3, 7, 2, 1 }, { -1, 14, 0, 1 }, { 2, 0, 7, 1 }, { 3, 0, 7, 1 }, { 5, 0, 2, 1 }, { 4, 0, 3, 1 },
+              { -1, 8, 0, 1 }, { 5, 0, 3, 1 }, { -1, 8, 0, 1 }, { 4, 0, 2, 1 }, { 4, 0, 5, 1 }, { 5, 0, 5, 1 }, { 0, 0, 4, 1 }, { -1, 18, 0, 1 },
+              { 0, 0, 14, 1 }, { 2, 0, 8, 1 }, { 2, 0, 3, 1 }, { 1, 0, 7, 1 }, { 0, 0, 8, 1 }, { 3, 0, 3, 1 }, { 3, 0, 8, 1 }, { 0, 0, 11, 1 },
+              { 1, 0, 5, 1 }, { 0, 17, 15, 1 }, { 2, 0, 4, 1 }, { 1, 17, 8, 1 }, { 3, 0, 4, 1 }, { 1, 0, 1, 1 }, { 1, 0, 6, 1 }, { 0, 0, 2, 1 },
+              { 2, 0, 5, 1 }, { 3, 0, 5, 1 }, { 0, 0, 5, 1 }, { 2, 0, 1, 1 }, { 3, 0, 9, 1 }, { 2, 0, 9, 1 }, { 0, 0, 9, 1 }, { 0, 0, 12, 1 },
+              { 0, 0, 3, 1 }, { 2, 0, 6, 1 }, { -1, 13, 0, 1 }, { 3, 0, 6, 1 }, { 0, 0, 13, 1 }, { 2, 0, 2, 1 }, { 5, 0, 4, 1 }, { -1, 8, -15, 1 },
+              { 4, 0, 4, 1 }, { 0, 1, 18, 1 }, { 0, 1, 17, 1 }, { 0, 1, 20, 1 }, { 0, 1, 19, 1 }, { 0, 2, 19, 1 }, { 1, 1, 5, 1 }, { 1, 1, 4, 1 },
+              { 1, 1, 7, 1 }, { 1, 1, 6, 1 }, { 1, 2, 6, 1 }, { 0, 1, 21, 1 }, { 0, 1, 22, 1 }, { 0, 1, 24, 1 }, { 0, 1, 23, 1 }, { 0, 2, 23, 1 },
+              { 0, 1, 25, 1 }, { 0, 1, 27, 1 }, { 0, 1, 26, 1 }, { 0, 2, 26, 1 }, { 0, 1, 28, 1 }, { -1, 16, 0, 1 }, { -1, 15, 0, 1 }, { 0, 1, 0, 1 },
+              { 0, 1, 1, 1 }, { 0, 1, 2, 1 }, { 0, 1, 4, 1 }, { 0, 1, 3, 1 }, { 0, 2, 3, 1 }, { -1, 21, 0, 1 }, { -1, 20, 0, 1 }, { -1, 22, 0, 1 },
+              { 0, 1, 5, 1 }, { 0, 1, 6, 1 }, { 0, 1, 7, 1 }, { 0, 1, 8, 1 }, { -1, 19, 0, 1 }, { 0, 1, 12, 1 }, { 0, 1, 14, 1 }, { 0, 1, 13, 1 },
+              { 0, 2, 13, 1 }, { 0, 1, 15, 1 }, { 2, 1, 8, -1 }, { 2, 1, 0, 1 }, { 2, 1, 1, 1 }, { 2, 1, 1, 1 }, { 2, 1, 3, 1 }, { 2, 1, 2, 1 },
+              { 2, 2, 2, 1 }, { 2, 1, 4, 1 }, { 2, 1, 5, 1 }, { 2, 1, 6, 1 }, { 2, 1, 7, 1 }, { 2, 1, 9, 1 }, { 2, 1, 10, 1 }, { 2, 1, 11, 1 },
+              { 2, 1, 12, 1 }, { 2, 12, 9, 1 }, { 2, 11, 9, 1 }, { 2, 10, 9, 1 }, { 2, 9, 9, 1 }, { 4, 1, 0, 1 }, { 4, 1, 1, 1 }, { -1, 8, 0, 1 },
+              { 4, 1, 2, 1 }, { 4, 1, 3, 1 }, { 4, 1, 4, 1 }, { 4, 1, 5, 1 }, { 1, 1, 8, 1 }, { 1, 1, 9, 1 }, { 1, 1, 11, 1 }, { 1, 1, 10, 1 },
+              { 1, 2, 10, 1 }, { 1, 1, 12, -1 }, { 1, 1, 0, 1 }, { 3, 1, 8, -1 }, { 3, 1, 0, 1 }, { 3, 1, 1, 1 }, { 3, 1, 1, 1 }, { 3, 1, 3, 1 },
+              { 3, 1, 2, 1 }, { 3, 2, 2, 1 }, { 3, 1, 4, 1 }, { 3, 1, 5, 1 }, { 3, 1, 6, 1 }, { 3, 1, 7, 1 }, { 3, 1, 9, 1 }, { 3, 1, 10, 1 },
+              { 3, 1, 11, 1 }, { 3, 1, 12, 1 }, { 3, 12, 9, 1 }, { 3, 11, 9, 1 }, { 3, 10, 9, 1 }, { 3, 9, 9, 1 }, { 5, 1, 0, 1 }, { 5, 1, 1, 1 },
+              { -1, 8, 0, 1 }, { 5, 1, 2, 1 }, { 5, 1, 3, 1 }, { 5, 1, 4, 1 }, { 5, 1, 5, 1 } } };
+            static constexpr int openTailNodes = 9, openTailPorts = 17, closedTailNodes = 3, closedTailPorts = 4; // the tails'
+            static constexpr double r136Ohms = 100.0, c61Seconds = 100.0 * 47.0e-6; // R136 and C61
+            static constexpr double followerOhms = 22.0e3;                          // R156 and R154
+            static constexpr int q23Base = 9, q23Collector = 10;                    // the open envelope's ports
+            static constexpr int r173Closed = 1, q23Junction = 2;                   // the closed envelope's
+            const HatState& openState = state[0];
+            const HatState& closedState = state[1];
+            // each stage's node voltages, once
+            std::array<double, 17> openV {};
+            std::array<double, 10> closedV {}, openVcaV {}, closedVcaV {};
+            std::array<double, 6> openOutV {}, closedOutV {};
+            if (openState.ranFull)
+                openFull.nodeVoltages(openV.data());
+            else
+                openTail.nodeVoltages(openV.data());
+            if (closedState.ranFull)
+                closedFull.nodeVoltages(closedV.data());
+            else
+                closedTail.nodeVoltages(closedV.data());
+            openVca.nodeVoltages(openVcaV.data());
+            closedVca.nodeVoltages(closedVcaV.data());
+            openOutput.nodeVoltages(openOutV.data());
+            closedOutput.nodeVoltages(closedOutV.data());
+            const auto openCurrent = [&](int port) { return openState.ranFull ? openFull.portCurrent(port, openV.data()) : openTail.portCurrent(port, openV.data()); };
+            const auto closedCurrent = [&](int port) { return closedState.ranFull ? closedFull.portCurrent(port, closedV.data()) : closedTail.portCurrent(port, closedV.data()); };
+
+            // C61: each envelope's copy from its full circuit, or once the hit has passed recovering through R136 (Q24, Q28
+            // off) from where the handover left it; the circuit's one C61 the two copies' droops together.
+            const auto recovered = [this](const HatState& s)
+            {
+                return supply - (supply - s.c61AtHandover) * std::exp(-static_cast<double>(s.tailSamples) / (sampleRate * c61Seconds));
+            };
+            const double openC61 = openState.ranFull ? openV[16] : recovered(openState);
+            const double closedC61 = closedState.ranFull ? closedV[9] : recovered(closedState);
+            const double c61Volts = openC61 + closedC61 - supply;
+            const double r136Amps = (openState.ranFull ? openFull.portCurrent(r136Open, openV.data()) : (supply - openC61) / r136Ohms)
+                                    + (closedState.ranFull ? closedFull.portCurrent(r136Closed, closedV.data()) : (supply - closedC61) / r136Ohms);
+            const double c61Amps = (openState.ranFull ? openFull.portCurrent(c61Open, openV.data()) : (supply - openC61) / r136Ohms)
+                                   + (closedState.ranFull ? closedFull.portCurrent(c61Closed, closedV.data()) : (supply - closedC61) / r136Ohms);
+            // IC2a's output, while either hat's pulse passes it
+            const double nv2 = std::max(openState.ranFull ? openV[10] : 0.0, closedState.ranFull ? closedV[4] : 0.0);
+            // The choke: from the open envelope while it runs, else from the closed one's
+            const bool openRan = envelopeRan[0];
+            const double chokeBase = openRan ? openV[7] : closedV[2];
+            const double r173Amps = openRan ? -openCurrent(r173Open) : closedCurrent(r173Closed);
+            const double q23BaseAmps = openRan ? openCurrent(q23Base) : closedCurrent(q23Junction);
+            const double q23CollectorAmps = openRan ? openCurrent(q23Collector) : 0.0;
+            // Q26's and Q31's emitters: R156 (R154) to -15 V, C80 (C74) on into the output, less what R147 (R153) brings in.
+            const double openLoad = (openVcaV[9] + supply) / followerOhms;
+            const double closedLoad = (closedVcaV[9] + supply) / followerOhms;
+            const double openEmitter = -(openLoad + openOutput.portCurrent(0, openOutV.data()) - openVca.portCurrent(10, openVcaV.data()));
+            const double closedEmitter = -(closedLoad + closedOutput.portCurrent(0, closedOutV.data()) - closedVca.portCurrent(10, closedVcaV.data()));
+
+            const auto read = [](const auto& c, const double* v, const Entry& e) -> double
+            {
+                switch (e.kind)
+                {
+                    case 0: return v[e.index];
+                    case 1: return c.portCurrent(e.index, v);
+                    case 2: return -(c.portCurrent(e.index, v) + c.portCurrent(e.index + 1, v));
+                    case 7: return 0.5 * (v[e.index] + v[e.index + 1]);
+                    default: return 0.0;
+                }
+            };
+            const auto follower = [](const Entry& e, double load, double emitter) -> double
+            {
+                const double base = -emitter / (betaF + 1.0);
+                switch (e.kind)
+                {
+                    case 9: return load;
+                    case 10: return emitter;
+                    case 11: return base;
+                    default: return -emitter - base;
+                }
+            };
+            // An envelope's entry: from the circuit that ran; the tail's trigger's parts off, a collector on C61 at its volts.
+            const auto envelope = [&](const Entry& e, bool full, int tailNodes, int tailPorts, const auto& fullCircuit, const auto& tailCircuit,
+                                      const double* v) -> double
+            {
+                if (e.kind == 17)
+                    return full ? v[e.index] : c61Volts;
+                if (full)
+                    return read(fullCircuit, v, e);
+                return (e.kind == 0 ? e.index <= tailNodes : e.index < tailPorts) ? read(tailCircuit, v, e) : 0.0;
+            };
+            for (int k = 0; k < liveCount; ++k)
+            {
+                const auto& e = entries[static_cast<std::size_t>(k)];
+                double value = 0.0;
+                switch (e.stage)
+                {
+                    case 0: value = envelope(e, openState.ranFull, openTailNodes, openTailPorts, openFull, openTail, openV.data()); break;
+                    case 1: value = envelope(e, closedState.ranFull, closedTailNodes, closedTailPorts, closedFull, closedTail, closedV.data()); break;
+                    case 2: value = e.kind >= 9 ? follower(e, openLoad, openEmitter) : read(openVca, openVcaV.data(), e); break;
+                    case 3: value = e.kind >= 9 ? follower(e, closedLoad, closedEmitter) : read(closedVca, closedVcaV.data(), e); break;
+                    case 4: value = read(openOutput, openOutV.data(), e); break;
+                    case 5: value = read(closedOutput, closedOutV.data(), e); break;
+                    default:
+                        switch (e.kind)
+                        {
+                            case 13: value = nv2; break;
+                            case 14: value = c61Volts; break;
+                            case 15: value = r136Amps; break;
+                            case 16: value = c61Amps; break;
+                            case 18: value = chokeBase; break;
+                            case 19: value = r173Amps; break;
+                            case 20: value = q23BaseAmps; break;
+                            case 21: value = q23CollectorAmps; break;
+                            case 22: value = -(q23BaseAmps + q23CollectorAmps); break;
+                            default: value = static_cast<double>(e.index); break; // the constants
+                        }
+                        break;
+                }
+                out[k] = static_cast<float>(e.sign * value);
+            }
+        }
+
     private:
         struct HatState
         {
             bool usingFull = false;
             int triggerSample = -1, sinceHit = 1 << 30;
             double pulseVolts = 7.0, pulseWidth = 0.001;
+            // For the tap (D317): which circuit ran last, and the envelope's C61 from the handover on.
+            bool ranFull = false;
+            int tailSamples = 0;           // the tail's samples since the handover
+            double c61AtHandover = supply; // its C61's volts as the full circuit left it
         };
 
         struct Gate
@@ -492,8 +694,8 @@ namespace coolsynth::synth::v3
             c.addResistor(12, 14, 10.0e3);                                                // R135
             c.addTransistor(15, 14, 2, transistorSaturation, betaF, betaR, thermal);      // Q24
             c.addResistor(15, 16, 470.0);                                                 // R137
-            c.addCapacitor(16, 0, 47.0e-6);                                               // C61
-            c.addResistor(1, 16, 100.0);                                                  // R136
+            c61Open = c.addCapacitor(16, 0, 47.0e-6);                                     // C61
+            r136Open = c.addResistor(1, 16, 100.0);                                       // R136
             c.addProbe(12);
         }
 
@@ -520,8 +722,8 @@ namespace coolsynth::synth::v3
             c.addResistor(6, 7, 33.0e3);                                                  // R141
             c.addTransistor(8, 7, 1, transistorSaturation, betaF, betaR, thermal);        // Q28
             c.addResistor(8, 9, 470.0);                                                   // R138
-            c.addCapacitor(9, 0, 47.0e-6);                                                // C61
-            c.addResistor(3, 9, 100.0);                                                   // R136
+            c61Closed = c.addCapacitor(9, 0, 47.0e-6);                                    // C61
+            r136Closed = c.addResistor(3, 9, 100.0);                                      // R136
             c.addProbe(6);
         }
 
@@ -568,12 +770,12 @@ namespace coolsynth::synth::v3
             o.probe = c.addProbe(4);
         }
 
-        wdf::Circuit<16, 31, 2, 0, 12, 5> openFull;
-        wdf::Circuit<9, 17, 1, 0, 6, 4> openTail;
-        wdf::Circuit<9, 15, 2, 0, 5, 3> closedFull;
-        wdf::Circuit<3, 4, 1, 0, 1, 2> closedTail;
-        wdf::Circuit<9, 13, 2, 1, 3, 3> openVca, closedVca;
-        wdf::Circuit<5, 6, 1, 1, 0, 1> openOutput, closedOutput;
+        wdf::Circuit<16, 31, 2, 0, 12, 5, true> openFull; // Tapped: a panel reads its nodes and currents (D317)
+        wdf::Circuit<9, 17, 1, 0, 6, 4, true> openTail;
+        wdf::Circuit<9, 15, 2, 0, 5, 3, true> closedFull;
+        wdf::Circuit<3, 4, 1, 0, 1, 2, true> closedTail;
+        wdf::Circuit<9, 13, 2, 1, 3, 3, true> openVca, closedVca;
+        wdf::Circuit<5, 6, 1, 1, 0, 1, true> openOutput, closedOutput;
 
         struct RestState
         {
@@ -621,5 +823,8 @@ namespace coolsynth::synth::v3
         int closedFullSupply = 0, closedDrive = 0, closedSwitch = 0, c63Port = 0, r142Env = 0, ceProbe = 0, b23cProbe = 0;
         Gate openGate, closedGate;
         Output openOut, closedOut;
+        // For the tap (D317): each full envelope's C61 and R136, and which envelopes ran this sample and the last.
+        int c61Open = 0, r136Open = 0, c61Closed = 0, r136Closed = 0;
+        std::array<bool, 2> envelopeRunning {}, envelopeRan {};
     };
 }

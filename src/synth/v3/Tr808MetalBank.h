@@ -161,6 +161,70 @@ namespace coolsynth::synth::v3
             return o.high / o.period;
         }
 
+        // ---- Its circuit as it runs, for a panel that draws it (CoolSynth's D317) ---------------------------------
+        // The node voltages and part currents its ngspice recording names (CoolSynth808's resources/lid): the six
+        // oscillators' outputs, the mix and both bands, every one modelled. Signs as ngspice's: a part's current from its
+        // first node to its second, all as the netlist has them. The oscillators are ideal inputs, so their nodes
+        // (no1 to no6) read the volts fed in, band-limited at an edge; the op-amps' insides are not recorded. While no
+        // instrument sounds the bank stands still, and its tap holds the last sample's values.
+
+        static constexpr int liveCount = 34;
+        static constexpr std::array<const char*, liveCount> liveNames { "n10", "n11", "n3am", "n3at", "n3bm", "n3bt", "nhb", "nlb", "no1", "no2", "no3", "no4", "no5", "no6", "nsum", "r50.i", "r48.i", "r46.i", "r39.i", "r37.i", "r35.i", "r53.i", "c11.i", "r55.i", "c15.i", "c16.i", "r58.i", "r59.i", "c10.i", "r52.i", "c13.i", "c14.i", "r56.i", "r57.i" };
+        /** How long a capture runs, ms (the recording itself runs 30, at every 20 us). */
+        static constexpr double liveMs = 30.0; // the recording's length
+        static constexpr bool liveEverySample = true; // its squares and 3.4 and 7.1 kHz bands: every 20 us
+
+        /** The named values after the last sample, in liveNames' order, from the bands' own state (its tap). */
+        void tap(float* out) const noexcept
+        {
+            // kind 0 a node's voltage, 1 a port's current; sign -1 where the port runs against the netlist (none here)
+            struct Entry { int stage, kind, index, sign; };
+            static constexpr std::array<Entry, liveCount> entries { {
+              { 0, 0, 12, 1 },
+              { 0, 0, 8, 1 },
+              { 0, 0, 13, 1 },
+              { 0, 0, 14, 1 },
+              { 0, 0, 9, 1 },
+              { 0, 0, 10, 1 },
+              { 0, 0, 11, 1 },
+              { 0, 0, 15, 1 },
+              { 0, 0, 1, 1 },
+              { 0, 0, 2, 1 },
+              { 0, 0, 3, 1 },
+              { 0, 0, 4, 1 },
+              { 0, 0, 5, 1 },
+              { 0, 0, 6, 1 },
+              { 0, 0, 7, 1 },
+              { 0, 1, 0, 1 },
+              { 0, 1, 1, 1 },
+              { 0, 1, 2, 1 },
+              { 0, 1, 3, 1 },
+              { 0, 1, 4, 1 },
+              { 0, 1, 5, 1 },
+              { 0, 1, 6, 1 },
+              { 0, 1, 7, 1 },
+              { 0, 1, 8, 1 },
+              { 0, 1, 9, 1 },
+              { 0, 1, 10, 1 },
+              { 0, 1, 11, 1 },
+              { 0, 1, 12, 1 },
+              { 0, 1, 15, 1 },
+              { 0, 1, 16, 1 },
+              { 0, 1, 17, 1 },
+              { 0, 1, 18, 1 },
+              { 0, 1, 19, 1 },
+              { 0, 1, 20, 1 } } };
+            // its node voltages, once
+            std::array<double, 18> bandsV {};
+            bands.nodeVoltages(bandsV.data());
+            for (int k = 0; k < liveCount; ++k)
+            {
+                const auto& e = entries[static_cast<std::size_t>(k)];
+                const double value = e.kind == 0 ? bandsV[static_cast<std::size_t>(e.index)] : bands.portCurrent(e.index, bandsV.data());
+                out[k] = static_cast<float>(e.sign * value);
+            }
+        }
+
         /** A capacitor scaled so the bilinear transform puts a peak at this frequency where the circuit has it. */
         [[nodiscard]] static double prewarp(double hz, double rate) noexcept
         {
@@ -222,7 +286,8 @@ namespace coolsynth::synth::v3
             bands.setCapacitance(c14, 6.8e-9 * l);
         }
 
-        wdf::Circuit<17, 23, 6, 2, 1, 3> bands; // no devices: one nonlinear slot so addOpAmp's unused clamp compiles
+        wdf::Circuit<17, 23, 6, 2, 1, 3, true> bands; // no devices: one nonlinear slot so addOpAmp's unused clamp compiles;
+                                                      // Tapped: a panel reads its nodes and currents (D317)
         std::array<Oscillator, oscillatorCount> oscillators {};
         std::array<int, oscillatorCount> inputs {};
         std::array<double, oscillatorCount> outputs {};

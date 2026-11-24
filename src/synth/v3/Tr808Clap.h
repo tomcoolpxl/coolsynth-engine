@@ -410,6 +410,246 @@ namespace coolsynth::synth::v3
             return mixer.probe(mixerOut);
         }
 
+        // ---- Its circuit as it runs, for a panel that draws it (CoolSynth's D317) ---------------------------------
+        // The node voltages and part currents its ngspice recording names (CoolSynth808's resources/lid, the clap's
+        // side: SW12 at the maracas', these read as they are), each from the stage the engine models it in, signed as
+        // ngspice's: a part's current from its first node to its second, a transistor's into its leads. C139, C143,
+        // D69, D68 and their nodes are the front's while a hit runs and the tail's once the front rests. The
+        // resistors joined a sample apart are their far ends' (R348 the reverb's, R362 and R368 the pair's): each runs
+        // after the circuit it joins, so it holds both ends of the same sample (its port runs from the far end, so
+        // turned round); while the reverb or the pair rests and the tail still runs, R348 and R362 are the tail's.
+        // ngspice counts a transistor's junction capacitances in its currents: Q69's emitter junction is in its base
+        // and emitter currents, Q72's collector junction in its base and collector currents. C152, R376 and their node
+        // are the mixer's, where R376 meets IC19's minus input (the reverb's copy ends on ground). IC22, the BA662, is
+        // its OTA's current into R383 and a follower: pins 6 and 8 both its output, R383's current that over 82 kOhm;
+        // pin 3 sits on R381 alone, 0 V and no current. Each copy an ideal input carries (IC21's output, Q70's
+        // collector, the supplies) is read where it is made. Not here, as the engine leaves them out: the common
+        // trigger's Q31, R117, R120 and their nodes n6, nb31, nx (the engine drives Q32's base, Q31 gone), and the
+        // select line's R103, R104, Q28 and their nodes ncpd, nb28, nc28 (R106 switched to ground in their place).
+        // The white noise is the generator's, where the recording has two sines.
+
+        static constexpr int liveCount = 143;
+        static constexpr double liveMs = 300.0; // the recording's length
+        static constexpr std::array<const char*, liveCount> liveNames { "n1", "n13", "n136", "n138", "n139", "n14", "n141", "n143", "n144", "n150", "n152", "n2", "n4", "n5", "n6r", "n8", "n9r", "nb29", "nb30", "nb32", "nb70", "nb72", "nb73", "nbp", "nc30", "nc70", "nc72", "nc73", "ncp", "ne69", "ne7", "ne70", "nh", "nm21", "no21", "np1", "np2", "np3", "np6", "np8", "nsum", "ntm", "nvr", "nwn", "nx70", "trig", "vcc", "vee", "vout", "vt", "q32.ic", "q32.ib", "q32.ie", "r113.i", "r105.i", "r106.i", "q29.ic", "q29.ib", "q29.ie", "r109.i", "r110.i", "q30.ic", "q30.ib", "q30.ie", "r111.i", "rswc.i", "q69.ic", "q69.ib", "q69.ie", "d69.id", "c139.i", "r348.i", "c138.i", "r349.i", "d68.id", "c143.i", "r362.i", "rtma.i", "rtmb.i", "r370.i", "r364.i", "r360.i", "r361.i", "r332.i", "c127.i", "r333.i", "c128.i", "c129.i", "r334.i", "r342.i", "r346.i", "c137.i", "q70.ic", "q70.ib", "q70.ie", "r369.i", "r200.i", "r363.i", "c146.i", "c152.i", "r376.i", "r353.i", "r352.i", "r351.i", "r350.i", "c140.i", "r355.i", "r354.i", "r365.i", "d71.id", "c144.i", "r356.i", "c142.i", "r359.i", "r358.i", "c141.i", "d70.id", "r357.i", "q73.ic", "q73.ib", "q73.ie", "r367.i", "r368.i", "r371.i", "r366.i", "q72.ic", "q72.ib", "q72.ie", "q71.ic", "q71.ib", "q71.ie", "r374.i", "c136.i", "r372.i", "r382.i", "r381.i", "r383.i", "c150.i", "r378.i", "r375.i", "c149.i", "rvr17.i", "c145.i" };
+
+        /** The named values after the last sample, in liveNames' order, from the stages' own state (their taps). */
+        void tap(float* out) const noexcept
+        {
+            // Kinds: 0 a node's voltage, 1 a port's current, 2 a transistor's emitter current from its base port (its
+            // collector port the next), 3 a node of the front or, while the front rests, the tail's node alt, 4 a port
+            // of the front or the tail's port alt, 5 a resistor joined a sample apart, its far end's port or, while that
+            // circuit rests, the front's or the tail's port alt as it is, 6 a port's current and its junction
+            // capacitor's (port alt), 7 a port's current less its junction capacitor's, 8 an emitter current with its
+            // junction capacitor's, 9 none (0), 10 a node's voltage over R383. Sign -1 where the engine's port runs
+            // against the netlist's part.
+            struct Entry { int stage, kind, index, alt, sign; };
+            static constexpr std::array<Entry, liveCount> entries { {
+              { 4, 0, 5, 0, 1 }, // n1
+              { 4, 0, 7, 0, 1 }, // n13
+              { 2, 0, 6, 0, 1 }, // n136
+              { 3, 0, 4, 0, 1 }, // n138
+              { 0, 3, 12, 1, 1 }, // n139
+              { 4, 0, 4, 0, 1 }, // n14
+              { 4, 0, 11, 0, 1 }, // n141
+              { 0, 3, 13, 2, 1 }, // n143
+              { 4, 0, 8, 0, 1 }, // n144
+              { 6, 0, 4, 0, 1 }, // n150
+              { 6, 0, 2, 0, 1 }, // n152
+              { 4, 0, 10, 0, 1 }, // n2
+              { 4, 0, 6, 0, 1 }, // n4
+              { 4, 0, 9, 0, 1 }, // n5
+              { 4, 0, 2, 0, 1 }, // n6r
+              { 0, 0, 14, 0, 1 }, // n8
+              { 4, 0, 3, 0, 1 }, // n9r
+              { 0, 0, 5, 0, 1 }, // nb29
+              { 0, 0, 7, 0, 1 }, // nb30
+              { 0, 0, 2, 0, 1 }, // nb32
+              { 3, 0, 3, 0, 1 }, // nb70
+              { 5, 0, 4, 0, 1 }, // nb72
+              { 4, 0, 12, 0, 1 }, // nb73
+              { 2, 0, 2, 0, 1 }, // nbp
+              { 0, 0, 8, 0, 1 }, // nc30
+              { 3, 0, 5, 0, 1 }, // nc70
+              { 5, 0, 7, 0, 1 }, // nc72
+              { 4, 0, 13, 0, 1 }, // nc73
+              { 0, 0, 9, 0, 1 }, // ncp
+              { 0, 3, 11, 4, 1 }, // ne69
+              { 5, 0, 3, 0, 1 }, // ne7
+              { 3, 0, 6, 0, 1 }, // ne70
+              { 5, 0, 5, 0, 1 }, // nh
+              { 2, 0, 3, 0, 1 }, // nm21
+              { 2, 0, 4, 0, 1 }, // no21
+              { 5, 0, 8, 0, 1 }, // np1
+              { 2, 0, 7, 0, 1 }, // np2
+              { 6, 9, 0, 0, 1 }, // np3
+              { 6, 0, 3, 0, 1 }, // np6
+              { 6, 0, 3, 0, 1 }, // np8
+              { 6, 0, 7, 0, 1 }, // nsum
+              { 5, 0, 6, 0, 1 }, // ntm
+              { 6, 0, 9, 0, 1 }, // nvr
+              { 2, 0, 1, 0, 1 }, // nwn
+              { 3, 0, 2, 0, 1 }, // nx70
+              { 0, 0, 4, 0, 1 }, // trig
+              { 0, 0, 3, 0, 1 }, // vcc
+              { 0, 0, 15, 0, 1 }, // vee
+              { 6, 0, 8, 0, 1 }, // vout
+              { 0, 0, 6, 0, 1 }, // vt
+              { 0, 1, 11, 0, 1 }, // q32.ic
+              { 0, 1, 10, 0, 1 }, // q32.ib
+              { 0, 2, 10, 0, 1 }, // q32.ie
+              { 0, 1, 12, 0, 1 }, // r113.i
+              { 0, 1, 13, 0, 1 }, // r105.i
+              { 0, 1, 14, 0, 1 }, // r106.i
+              { 0, 1, 16, 0, 1 }, // q29.ic
+              { 0, 1, 15, 0, 1 }, // q29.ib
+              { 0, 2, 15, 0, 1 }, // q29.ie
+              { 0, 1, 17, 0, 1 }, // r109.i
+              { 0, 1, 18, 0, 1 }, // r110.i
+              { 0, 1, 20, 0, 1 }, // q30.ic
+              { 0, 1, 19, 0, 1 }, // q30.ib
+              { 0, 2, 19, 0, 1 }, // q30.ie
+              { 0, 1, 21, 0, 1 }, // r111.i
+              { 0, 1, 22, 0, 1 }, // rswc.i
+              { 0, 1, 25, 0, 1 }, // q69.ic
+              { 0, 6, 24, 26, 1 }, // q69.ib
+              { 0, 8, 24, 26, 1 }, // q69.ie
+              { 0, 4, 7, 7, 1 }, // d69.id
+              { 0, 4, 0, 0, 1 }, // c139.i
+              { 3, 5, 0, 1, -1 }, // r348.i
+              { 3, 1, 1, 0, 1 }, // c138.i
+              { 3, 1, 2, 0, 1 }, // r349.i
+              { 0, 4, 8, 8, 1 }, // d68.id
+              { 0, 4, 2, 2, 1 }, // c143.i
+              { 5, 5, 12, 3, -1 }, // r362.i
+              { 5, 1, 10, 0, 1 }, // rtma.i
+              { 5, 1, 11, 0, 1 }, // rtmb.i
+              { 5, 1, 9, 0, 1 }, // r370.i
+              { 5, 1, 8, 0, 1 }, // r364.i
+              { 0, 1, 27, 0, 1 }, // r360.i
+              { 0, 1, 28, 0, 1 }, // r361.i
+              { 2, 1, 0, 0, 1 }, // r332.i
+              { 2, 1, 1, 0, 1 }, // c127.i
+              { 2, 1, 2, 0, 1 }, // r333.i
+              { 2, 1, 3, 0, 1 }, // c128.i
+              { 2, 1, 4, 0, 1 }, // c129.i
+              { 2, 1, 5, 0, 1 }, // r334.i
+              { 3, 1, 3, 0, 1 }, // r342.i
+              { 3, 1, 4, 0, 1 }, // r346.i
+              { 3, 1, 5, 0, 1 }, // c137.i
+              { 3, 1, 7, 0, 1 }, // q70.ic
+              { 3, 1, 6, 0, 1 }, // q70.ib
+              { 3, 2, 6, 0, 1 }, // q70.ie
+              { 3, 1, 8, 0, 1 }, // r369.i
+              { 3, 1, 9, 0, 1 }, // r200.i
+              { 3, 1, 10, 0, 1 }, // r363.i
+              { 3, 1, 11, 0, 1 }, // c146.i
+              { 6, 1, 0, 0, 1 }, // c152.i
+              { 6, 1, 1, 0, 1 }, // r376.i
+              { 4, 1, 0, 0, 1 }, // r353.i
+              { 4, 1, 1, 0, 1 }, // r352.i
+              { 4, 1, 2, 0, 1 }, // r351.i
+              { 4, 1, 4, 0, 1 }, // r350.i
+              { 4, 1, 5, 0, 1 }, // c140.i
+              { 4, 1, 7, 0, 1 }, // r355.i
+              { 4, 1, 8, 0, 1 }, // r354.i
+              { 4, 1, 10, 0, 1 }, // r365.i
+              { 4, 1, 11, 0, 1 }, // d71.id
+              { 4, 1, 12, 0, 1 }, // c144.i
+              { 4, 1, 13, 0, 1 }, // r356.i
+              { 4, 1, 15, 0, 1 }, // c142.i
+              { 4, 1, 16, 0, 1 }, // r359.i
+              { 4, 1, 17, 0, 1 }, // r358.i
+              { 4, 1, 18, 0, 1 }, // c141.i
+              { 4, 1, 19, 0, 1 }, // d70.id
+              { 4, 1, 20, 0, 1 }, // r357.i
+              { 4, 1, 22, 0, 1 }, // q73.ic
+              { 4, 1, 21, 0, 1 }, // q73.ib
+              { 4, 2, 21, 0, 1 }, // q73.ie
+              { 4, 1, 23, 0, 1 }, // r367.i
+              { 5, 1, 0, 0, -1 }, // r368.i
+              { 5, 1, 1, 0, 1 }, // r371.i
+              { 5, 1, 2, 0, 1 }, // r366.i
+              { 5, 6, 4, 5, 1 }, // q72.ic
+              { 5, 7, 3, 5, 1 }, // q72.ib
+              { 5, 2, 3, 0, 1 }, // q72.ie
+              { 5, 1, 7, 0, 1 }, // q71.ic
+              { 5, 1, 6, 0, 1 }, // q71.ib
+              { 5, 2, 6, 0, 1 }, // q71.ie
+              { 5, 1, 13, 0, 1 }, // r374.i
+              { 2, 1, 9, 0, 1 }, // c136.i
+              { 2, 1, 10, 0, 1 }, // r372.i
+              { 2, 1, 11, 0, 1 }, // r382.i
+              { 6, 9, 0, 0, 1 }, // r381.i
+              { 6, 10, 3, 0, 1 }, // r383.i
+              { 6, 1, 2, 0, 1 }, // c150.i
+              { 6, 1, 3, 0, 1 }, // r378.i
+              { 6, 1, 6, 0, 1 }, // r375.i
+              { 6, 1, 7, 0, 1 }, // c149.i
+              { 6, 1, 8, 0, 1 }, // rvr17.i
+              { 6, 1, 9, 0, 1 } // c145.i
+            } };
+            // each stage's node voltages, once (MaxNodes + 1 each: ground first)
+            std::array<double, 17> frontV {};
+            std::array<double, 5> tailV {};
+            std::array<double, 8> bandPassV {};
+            std::array<double, 10> reverbV {}, pairV {}, mixerV {};
+            std::array<double, 14> burstsV {};
+            front.nodeVoltages(frontV.data());
+            tail.nodeVoltages(tailV.data());
+            bandPass.nodeVoltages(bandPassV.data());
+            reverb.nodeVoltages(reverbV.data());
+            bursts.nodeVoltages(burstsV.data());
+            pair.nodeVoltages(pairV.data());
+            mixer.nodeVoltages(mixerV.data());
+            const auto frontOrTail = [&](int frontPort, int tailPort) -> double
+            {
+                return frontResting ? tail.portCurrent(tailPort, tailV.data()) : front.portCurrent(frontPort, frontV.data());
+            };
+            for (int k = 0; k < liveCount; ++k)
+            {
+                const auto& e = entries[static_cast<std::size_t>(k)];
+                const auto read = [&e](const auto& c, const double* v) -> double
+                {
+                    switch (e.kind)
+                    {
+                        case 0: return v[e.index];
+                        case 2: return -(c.portCurrent(e.index, v) + c.portCurrent(e.index + 1, v));
+                        case 6: return c.portCurrent(e.index, v) + c.portCurrent(e.alt, v);
+                        case 7: return c.portCurrent(e.index, v) - c.portCurrent(e.alt, v);
+                        case 8: return -(c.portCurrent(e.index, v) + c.portCurrent(e.index + 1, v) + c.portCurrent(e.alt, v));
+                        case 9: return 0.0;
+                        case 10: return v[e.index] / ota6Ohms;
+                        default: return c.portCurrent(e.index, v);
+                    }
+                };
+                double value = 0.0;
+                int sign = e.sign;
+                if (e.kind == 3)
+                    value = frontResting ? tailV[static_cast<std::size_t>(e.alt)] : frontV[static_cast<std::size_t>(e.index)];
+                else if (e.kind == 4)
+                    value = frontOrTail(e.index, e.alt);
+                else if (e.kind == 5 && (e.stage == 3 ? reverbResting : burstsResting))
+                {
+                    value = frontOrTail(e.alt, e.alt); // the near end's, as the netlist runs it
+                    sign = 1;
+                }
+                else
+                {
+                    switch (e.stage)
+                    {
+                        case 0: value = read(front, frontV.data()); break;
+                        case 1: value = read(tail, tailV.data()); break;
+                        case 2: value = read(bandPass, bandPassV.data()); break;
+                        case 3: value = read(reverb, reverbV.data()); break;
+                        case 4: value = read(bursts, burstsV.data()); break;
+                        case 5: value = read(pair, pairV.data()); break;
+                        default: value = read(mixer, mixerV.data()); break;
+                    }
+                }
+                out[k] = static_cast<float>(sign * value);
+            }
+        }
+
         // The stages' last outputs, for tests against the reference.
         [[nodiscard]] double triggerNodeVolts() const noexcept { return frontResting ? restState(isMaracas).triggerVolts : front.probe(frontTrigger); }
         [[nodiscard]] double pin8Volts() const noexcept { return frontResting ? restState(isMaracas).pin8Volts : front.probe(frontPin8); }
@@ -822,15 +1062,15 @@ namespace coolsynth::synth::v3
             mixerOut = mixer.addProbe(8);
         }
 
-        wdf::Circuit<16, 30, 3, 0, 11, 7> front;
-        wdf::Circuit<4, 10, 1, 0, 2, 3> tail; // room for an input it does not use: MSVC finds code unreachable with none
-        wdf::Circuit<7, 12, 1, 1, 1, 2> bandPass;
-        wdf::Circuit<9, 14, 3, 0, 2, 4> reverb;
-        wdf::Circuit<13, 25, 1, 0, 4, 10> bursts;
-        wdf::Circuit<9, 16, 2, 0, 5, 4> pair;
-        wdf::Circuit<4, 8, 1, 0, 3, 3> maEnvelope;
-        wdf::Circuit<15, 22, 4, 0, 7, 4> maNoise;
-        wdf::Circuit<9, 10, 3, 1, 0, 1> mixer;
+        wdf::Circuit<16, 30, 3, 0, 11, 7, true> front; // Tapped: a panel reads its nodes and currents (D317)
+        wdf::Circuit<4, 10, 1, 0, 2, 3, true> tail;    // room for an input it does not use: MSVC finds code unreachable with none
+        wdf::Circuit<7, 12, 1, 1, 1, 2, true> bandPass;
+        wdf::Circuit<9, 14, 3, 0, 2, 4, true> reverb;
+        wdf::Circuit<13, 25, 1, 0, 4, 10, true> bursts;
+        wdf::Circuit<9, 16, 2, 0, 5, 4, true> pair;
+        wdf::Circuit<4, 8, 1, 0, 3, 3, true> maEnvelope;
+        wdf::Circuit<15, 22, 4, 0, 7, 4, true> maNoise;
+        wdf::Circuit<9, 10, 3, 1, 0, 1, true> mixer;
 
         struct RestState
         {

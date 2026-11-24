@@ -123,6 +123,7 @@ namespace coolsynth::synth::v3
             clap.setMaracas(false);
             snare.rest();
             clap.rest();
+            capture.stop(); // a capture under way ends with the reset (D317)
             pending.fill(false);
             pendingOther.fill(false);
             pendingVelocity.fill(1.0f);
@@ -200,6 +201,7 @@ namespace coolsynth::synth::v3
                         if (! running[i])
                             snare.rest(); // rung down: its next hit starts from rest
                         snare.trigger(volts);
+                        capture.begin<Tr808Snare>(params.watch, CircuitWatch::snare, snareDrum); // D318
                     }
                     else
                     {
@@ -207,6 +209,8 @@ namespace coolsynth::synth::v3
                             clap.rest();
                         clap.select(pendingOther[i]);
                         clap.trigger(volts);
+                        if (! pendingOther[i]) // the clap's sheet; not the maracas
+                            capture.begin<Tr808Clap>(params.watch, CircuitWatch::clap, clapPair);
                     }
                     running[i] = true;
                     shedding[i] = false;
@@ -225,7 +229,19 @@ namespace coolsynth::synth::v3
                     const auto i = static_cast<std::size_t>(k);
                     if (! running[i])
                         continue;
-                    double y = k == snareDrum ? snare.process(white) : clap.process(white);
+                    double y = 0.0;
+                    if (k == snareDrum)
+                    {
+                        y = snare.process(white);
+                        if (capture.instrument() == snareDrum)
+                            capture.after(snare, sampleRate);
+                    }
+                    else
+                    {
+                        y = clap.process(white);
+                        if (capture.instrument() == clapPair)
+                            capture.after(clap, sampleRate);
+                    }
                     y *= circuitVoltsToLevel;
                     if (shedding[i])
                     {
@@ -372,6 +388,7 @@ namespace coolsynth::synth::v3
         double sampleRate = 96000.0;
         Tr808Snare snare;
         Tr808Clap clap;
+        CircuitCapture capture; // a hit's circuit captured for a panel (D317)
         std::array<bool, instrumentCount> pending {}, pendingOther {}, running {};
         std::array<float, instrumentCount> pendingVelocity {};
         std::array<double, instrumentCount> level {}, sinceHit {};

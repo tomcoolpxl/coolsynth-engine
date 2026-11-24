@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 
 /*
     What the 808's circuits are doing, for a panel to show as they play (CoolSynth's D313): each instrument's level,
@@ -24,6 +25,8 @@ namespace coolsynth::synth::v3
             cowbell, cymbal, openHat, closedHat,            // the 808 Metal
             lightCount
         };
+        /** The metal oscillators' sheet watches the bank itself, which no light stands for (D317). */
+        static constexpr int metalBankSheet = lightCount;
 
         /** From the audio thread: the instrument's level now; the highest since the last take is kept. */
         void raise(int light, float level) noexcept
@@ -52,7 +55,7 @@ namespace coolsynth::synth::v3
         // node voltages and part currents (as its ngspice recording names them) frame by frame over the hit: every 4
         // samples for the first 8 ms, then every 0.5 ms, as the recordings' own grid. The interface reads the frames
         // written so far; a hit while it copies them starts no new capture.
-        static constexpr int captureSeries = 192, captureFrames = 1024;
+        static constexpr int captureSeries = 192, captureFrames = 1536; // the cymbal's 600 ms on the grid: some 1380 frames
 
         /** The interface: the instrument to capture (a Light), or -1 for none. */
         void watchCircuit(int light) noexcept { watched.store(light, std::memory_order_release); }
@@ -95,5 +98,61 @@ namespace coolsynth::synth::v3
         int seriesCount = 0;
         std::array<float, captureFrames> times {};
         std::array<std::array<float, captureSeries>, captureFrames> values {};
+    };
+
+    /**
+        A generator's capture of one of its instruments' circuit at a hit, into a watch (D317, D318): begun at
+        the hit, then after each of that instrument's samples a frame on the recordings' grid (every 1/24 ms for the
+        first 8 ms, then every 0.5 ms), for as long as its recording runs (its liveMs: the bass drum's 300 ms, the
+        tom's 600, the rim shot's 150 and so on). The instrument class gives liveNames, liveCount, liveMs and
+        tap(float*), and liveEverySample when its recording is on a 20 us grid throughout (the metal oscillators').
+    */
+    class CircuitCapture final
+    {
+    public:
+        /** At a hit of `instrument` (the generator's own number) shown as `light`: true when a capture begins. */
+        template <class Circuit>
+        bool begin(CircuitWatch* watch, int light, int instrument) noexcept
+        {
+            static_assert(Circuit::liveCount <= CircuitWatch::captureSeries, "a watch's frames hold its series");
+            if (watch == nullptr || ! watch->beginCapture(light, Circuit::liveNames.data(), Circuit::liveCount))
+                return false;
+            into = watch;
+            which = instrument;
+            frame = 0;
+            sample = 0;
+            return true;
+        }
+        /** The instrument being captured, or -1. */
+        [[nodiscard]] int instrument() const noexcept { return into != nullptr ? which : -1; }
+        /** After a sample of the captured instrument. */
+        template <class Circuit>
+        void after(const Circuit& circuit, double sampleRate) noexcept
+        {
+            if (into == nullptr)
+                return;
+            const double ms = 1000.0 * static_cast<double>(sample) / sampleRate;
+            // the recordings' grid in time, whatever rate the generator runs at (the metal one's 96 kHz)
+            const auto every = [sampleRate](double seconds) { return std::max<long>(1, std::lround(seconds * sampleRate)); };
+            long stride = ms < 8.0 ? every(1.0 / 24000.0) : every(0.0005);
+            if constexpr (requires { Circuit::liveEverySample; })
+                if (Circuit::liveEverySample)
+                    stride = every(1.0 / 50000.0); // the oscillators' recording: every 20 us
+            if (sample % stride == 0 && frame < CircuitWatch::captureFrames)
+            {
+                circuit.tap(into->frame(frame));
+                into->frameWritten(frame, static_cast<float>(ms));
+                ++frame;
+            }
+            ++sample;
+            if (ms >= Circuit::liveMs || frame >= CircuitWatch::captureFrames)
+                into = nullptr;
+        }
+        void stop() noexcept { into = nullptr; }
+
+    private:
+        CircuitWatch* into = nullptr;
+        int which = -1, frame = 0;
+        long sample = 0;
     };
 }

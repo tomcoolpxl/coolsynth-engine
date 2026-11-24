@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 
@@ -174,6 +175,132 @@ namespace coolsynth::synth::v3
             return output.probe(outputProbe);
         }
 
+        // ---- Its circuit as it runs, for a panel that draws it (CoolSynth's D317) ---------------------------------
+        // The node voltages and part currents its ngspice recording names (CoolSynth808's resources/lid), each from
+        // the stage the engine models it in: where a part is in two stages (R28, R29 in the envelope and the VCAs;
+        // IC2b's output in the VCAs and the output) the VCAs', whose ends are both this sample's. Signs as ngspice's:
+        // a part's current from its first node to its second, a transistor's into its leads; R28's and R29's sources in
+        // the VCAs run from np1 (np2) to the envelope, against the netlist, so turned round. The collector junctions
+        // the engine adds to Q5, Q15 and Q14 stay out of their currents, as the bass drum's junctions do (ngspice
+        // counts them in the leads). Not here, as the engine leaves them out: the common trigger's Q31, Q32, R117,
+        // R120, R113 and their nodes n6, nt31, nt32, nx; the select line's R4, R5 and Q1 with jcb, nb1, nc1 (R9 to
+        // ground through Q1 is the engine's); IC2a's buffer, R18 to R23, D1 and trig, ny, nz, n2m
+        // (Tr808MetalTriggerBuffer, solved once a hit).
+
+        static constexpr int liveCount = 72;
+        static constexpr std::array<const char*, liveCount> liveNames { "n2bm", "n30", "n31", "n34", "n62", "n64", "n6ap", "n75", "nb14", "nb15", "nb5", "nc14", "nc15", "ncb5", "ncbe", "ncbo", "nd2", "ne14", "ne15", "nf", "no1", "no2", "np1", "np2", "nv2", "nvr5", "nw5", "vcc", "r9.i", "r14.i", "q5.ic", "q5.ib", "q5.ie", "r122.i", "d2.id", "c9.i", "r82.i", "c34.i", "r28.i", "r29.i", "r62.i", "r63.i", "c32.i", "r30.i", "q15.ic", "q15.ib", "q15.ie", "r31.i", "d3.id", "r64.i", "r65.i", "c33.i", "r32.i", "q14.ic", "q14.ib", "q14.ie", "r33.i", "d4.id", "r26.i", "c30.i", "r27.i", "c31.i", "r24.i", "c28.i", "c29.i", "r25.i", "c75.i", "r116.i", "rvr5a.i", "rvr5b.i", "c76.i", "r117.i" };
+        /** How long a hit's capture runs, ms (the recording itself runs 250). */
+        static constexpr double liveMs = 250.0; // the recording's length
+
+        /** The named values after the last sample, in liveNames' order, from the stages' own state (their taps). */
+        void tap(float* out) const noexcept
+        {
+            // stage 0 the envelope, 1 the VCAs, 2 the output; kind 0 a node's voltage, 1 a port's current, 2 a
+            // transistor's emitter current from its base port; sign -1 where the port runs against the netlist
+            struct Entry { int stage, kind, index, sign; };
+            static constexpr std::array<Entry, liveCount> entries { {
+              { 1, 0, 17, 1 },
+              { 1, 0, 14, 1 },
+              { 1, 0, 15, 1 },
+              { 0, 0, 6, 1 },
+              { 1, 0, 4, 1 },
+              { 1, 0, 9, 1 },
+              { 2, 0, 5, 1 },
+              { 2, 0, 2, 1 },
+              { 1, 0, 10, 1 },
+              { 1, 0, 5, 1 },
+              { 0, 0, 2, 1 },
+              { 1, 0, 11, 1 },
+              { 1, 0, 6, 1 },
+              { 0, 0, 3, 1 },
+              { 0, 0, 5, 1 },
+              { 1, 0, 18, 1 },
+              { 0, 0, 4, 1 },
+              { 1, 0, 12, 1 },
+              { 1, 0, 7, 1 },
+              { 1, 0, 16, 1 },
+              { 1, 0, 1, 1 },
+              { 1, 0, 2, 1 },
+              { 1, 0, 8, 1 },
+              { 1, 0, 13, 1 },
+              { 0, 0, 1, 1 },
+              { 2, 0, 3, 1 },
+              { 2, 0, 4, 1 },
+              { 1, 0, 3, 1 },
+              { 0, 1, 1, 1 },
+              { 0, 1, 0, 1 },
+              { 0, 1, 3, 1 },
+              { 0, 1, 2, 1 },
+              { 0, 2, 2, 1 },
+              { 0, 1, 5, 1 },
+              { 0, 1, 6, 1 },
+              { 0, 1, 7, 1 },
+              { 0, 1, 8, 1 },
+              { 0, 1, 9, 1 },
+              { 1, 1, 9, -1 },
+              { 1, 1, 19, -1 },
+              { 1, 1, 0, 1 },
+              { 1, 1, 1, 1 },
+              { 1, 1, 2, 1 },
+              { 1, 1, 3, 1 },
+              { 1, 1, 5, 1 },
+              { 1, 1, 4, 1 },
+              { 1, 2, 4, 1 },
+              { 1, 1, 7, 1 },
+              { 1, 1, 8, 1 },
+              { 1, 1, 10, 1 },
+              { 1, 1, 11, 1 },
+              { 1, 1, 12, 1 },
+              { 1, 1, 13, 1 },
+              { 1, 1, 15, 1 },
+              { 1, 1, 14, 1 },
+              { 1, 2, 14, 1 },
+              { 1, 1, 17, 1 },
+              { 1, 1, 18, 1 },
+              { 1, 1, 20, 1 },
+              { 1, 1, 21, 1 },
+              { 1, 1, 22, 1 },
+              { 1, 1, 23, 1 },
+              { 1, 1, 24, 1 },
+              { 1, 1, 25, 1 },
+              { 1, 1, 26, 1 },
+              { 1, 1, 27, 1 },
+              { 2, 1, 0, 1 },
+              { 2, 1, 1, 1 },
+              { 2, 1, 2, 1 },
+              { 2, 1, 3, 1 },
+              { 2, 1, 4, 1 },
+              { 2, 1, 5, 1 } } };
+            // each stage's node voltages, once
+            std::array<double, 7> frontV {};
+            std::array<double, 20> vcaV {};
+            std::array<double, 6> outputV {};
+            front.nodeVoltages(frontV.data());
+            vca.nodeVoltages(vcaV.data());
+            output.nodeVoltages(outputV.data());
+            for (int k = 0; k < liveCount; ++k)
+            {
+                const auto& e = entries[static_cast<std::size_t>(k)];
+                const auto read = [&e](const auto& c, const double* v) -> double
+                {
+                    switch (e.kind)
+                    {
+                        case 0: return v[e.index];
+                        case 1: return c.portCurrent(e.index, v);
+                        default: return -(c.portCurrent(e.index, v) + c.portCurrent(e.index + 1, v));
+                    }
+                };
+                double value = 0.0;
+                switch (e.stage)
+                {
+                    case 0: value = read(front, frontV.data()); break;
+                    case 1: value = read(vca, vcaV.data()); break;
+                    default: value = read(output, outputV.data()); break;
+                }
+                out[k] = static_cast<float>(e.sign * value);
+            }
+        }
+
         // The stages' last outputs, for tests against the reference.
         [[nodiscard]] double envelopeVolts() const noexcept { return lastEnvelope; }
         [[nodiscard]] double gateVolts(int which) const noexcept { return which == 0 ? lastP1 : lastP2; }
@@ -270,9 +397,9 @@ namespace coolsynth::synth::v3
             outputProbe = output.addProbe(5);
         }
 
-        wdf::Circuit<6, 12, 1, 0, 3, 2> front;
-        wdf::Circuit<19, 31, 3, 1, 7, 5> vca;
-        wdf::Circuit<5, 6, 1, 0, 0, 1> output;
+        wdf::Circuit<6, 12, 1, 0, 3, 2, true> front;  // Tapped: a panel reads its nodes and currents (D317)
+        wdf::Circuit<19, 31, 3, 1, 7, 5, true> vca;
+        wdf::Circuit<5, 6, 1, 0, 0, 1, true> output;
 
         struct RestState
         {

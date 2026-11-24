@@ -235,6 +235,151 @@ namespace coolsynth::synth::v3
             return mixer.probe(mixerOut);
         }
 
+        // ---- Its circuit as it runs, for a panel that draws it (CoolSynth's D317) ---------------------------------
+        // The node voltages and part currents its ngspice recording names (CoolSynth808's resources/lid, the low pair's
+        // sheet, which the mid and high pairs and the congas share), each from the stage the engine models it in:
+        // where a part is in two stages, the one that sees both its ends at this sample (R218 in the gate, where the
+        // front holds the gate's end a sample late; R232 in the gate, where it loads C75), and a node fed on as an
+        // ideal input read in the stage it is built in. Signs as ngspice's: a part's current from its first node to
+        // its second, a transistor's into its leads. The germanium pair D80, D81 is one port here: each diode's own
+        // current is split from the pair's exactly. npn is the engine's own pink noise bus (zero while no tom runs),
+        // not the recording's test sine. Not here, as the engine leaves them out: the common trigger's Q31, R117 and
+        // R120 and its nodes n6, nb31 and nx (the engine drives Q32's base, Q31 gone), and the select line's R211,
+        // R212 and Q50 and its nodes nlt, nb50 and nc50 (R213 switches to ground in their place).
+
+        static constexpr int liveCount = 78;
+        static constexpr double liveMs = 600.0; // the recording's length
+        static constexpr std::array<const char*, liveCount> liveNames { "nb32", "vcc", "trig", "nb51", "vt", "na", "np", "nd", "nev", "nq", "npn", "nw", "nb52", "nc52", "nh", "nfl", "ninv", "nm", "no1", "nwip", "nv1", "nin2", "no2", "nc81", "nsum", "vout", "nvr", "q32.ib", "q32.ic", "q32.ie", "r113.i", "r214.i", "r213.i", "q51.ib", "q51.ic", "q51.ie", "r215.i", "c73.i", "d56.id", "r226.i", "r225.i", "r224.i", "r219.i", "d55.id", "c72.i", "r218.i", "r216.i", "r217.i", "c71.i", "r220.i", "q52.ib", "q52.ic", "q52.ie", "r221.i", "c74.i", "r223.i", "r222.i", "c75.i", "r232.i", "c76.i", "cint.i", "c78.i", "c77.i", "r228.i", "r231.i", "rvb.i", "rva.i", "d80.id", "d81.id", "r229.i", "r227.i", "r230.i", "r233.i", "c81.i", "r235.i", "c83.i", "rvr10.i", "c82.i" };
+
+        /** The named values after the last sample, in liveNames' order, from the stages' own state (their taps). */
+        void tap(float* out) const noexcept
+        {
+            // stage: 0 front, 1 gate, 2 resonator, 3 mixer. kind: 0 a node's voltage, 1 a port's current, 2 a
+            // transistor's emitter current from its base port (its collector port the next), 3 and 4 D80's and D81's
+            // currents from the germanium pair's port. sign: against the netlist's node order (all as it).
+            struct Entry { int stage, kind, index, sign; };
+            static constexpr std::array<Entry, liveCount> entries { {
+              { 0, 0, 2, 1 },   // nb32
+              { 0, 0, 3, 1 },   // vcc
+              { 0, 0, 4, 1 },   // trig
+              { 0, 0, 5, 1 },   // nb51
+              { 0, 0, 6, 1 },   // vt
+              { 0, 0, 7, 1 },   // na
+              { 0, 0, 8, 1 },   // np
+              { 0, 0, 9, 1 },   // nd
+              { 0, 0, 10, 1 },  // nev
+              { 1, 0, 2, 1 },   // nq
+              { 1, 0, 3, 1 },   // npn
+              { 1, 0, 4, 1 },   // nw
+              { 1, 0, 5, 1 },   // nb52
+              { 1, 0, 6, 1 },   // nc52
+              { 1, 0, 8, 1 },   // nh
+              { 1, 0, 9, 1 },   // nfl
+              { 2, 0, 2, 1 },   // ninv
+              { 2, 0, 3, 1 },   // nm
+              { 2, 0, 4, 1 },   // no1
+              { 2, 0, 5, 1 },   // nwip
+              { 2, 0, 6, 1 },   // nv1
+              { 2, 0, 7, 1 },   // nin2
+              { 2, 0, 8, 1 },   // no2
+              { 3, 0, 2, 1 },   // nc81
+              { 3, 0, 3, 1 },   // nsum
+              { 3, 0, 4, 1 },   // vout
+              { 3, 0, 5, 1 },   // nvr
+              { 0, 1, 1, 1 },   // q32.ib
+              { 0, 1, 2, 1 },   // q32.ic
+              { 0, 2, 1, 1 },   // q32.ie
+              { 0, 1, 3, 1 },   // r113.i
+              { 0, 1, 4, 1 },   // r214.i
+              { 0, 1, 5, 1 },   // r213.i
+              { 0, 1, 6, 1 },   // q51.ib
+              { 0, 1, 7, 1 },   // q51.ic
+              { 0, 2, 6, 1 },   // q51.ie
+              { 0, 1, 8, 1 },   // r215.i
+              { 0, 1, 9, 1 },   // c73.i
+              { 0, 1, 10, 1 },  // d56.id
+              { 0, 1, 11, 1 },  // r226.i
+              { 0, 1, 12, 1 },  // r225.i
+              { 0, 1, 13, 1 },  // r224.i
+              { 0, 1, 14, 1 },  // r219.i
+              { 0, 1, 15, 1 },  // d55.id
+              { 0, 1, 16, 1 },  // c72.i
+              { 1, 1, 0, 1 },   // r218.i
+              { 1, 1, 1, 1 },   // r216.i
+              { 1, 1, 2, 1 },   // r217.i
+              { 1, 1, 3, 1 },   // c71.i
+              { 1, 1, 4, 1 },   // r220.i
+              { 1, 1, 5, 1 },   // q52.ib
+              { 1, 1, 6, 1 },   // q52.ic
+              { 1, 2, 5, 1 },   // q52.ie
+              { 1, 1, 7, 1 },   // r221.i
+              { 1, 1, 8, 1 },   // c74.i
+              { 1, 1, 9, 1 },   // r223.i
+              { 1, 1, 10, 1 },  // r222.i
+              { 1, 1, 11, 1 },  // c75.i
+              { 1, 1, 12, 1 },  // r232.i
+              { 2, 1, 0, 1 },   // c76.i
+              { 2, 1, 1, 1 },   // cint.i
+              { 2, 1, 2, 1 },   // c78.i
+              { 2, 1, 3, 1 },   // c77.i
+              { 2, 1, 4, 1 },   // r228.i
+              { 2, 1, 5, 1 },   // r231.i
+              { 2, 1, 6, 1 },   // rvb.i
+              { 2, 1, 7, 1 },   // rva.i
+              { 2, 3, 9, 1 },   // d80.id
+              { 2, 4, 9, 1 },   // d81.id
+              { 2, 1, 10, 1 },  // r229.i
+              { 2, 1, 11, 1 },  // r227.i
+              { 2, 1, 12, 1 },  // r230.i
+              { 3, 1, 0, 1 },   // r233.i
+              { 3, 1, 1, 1 },   // c81.i
+              { 3, 1, 3, 1 },   // r235.i
+              { 3, 1, 4, 1 },   // c83.i
+              { 3, 1, 5, 1 },   // rvr10.i
+              { 3, 1, 6, 1 } } }; // c82.i
+            // each stage's node voltages, once (ground and every node: MaxNodes + 1)
+            std::array<double, 11> frontV {};
+            std::array<double, 10> gateV {};
+            std::array<double, 12> resonatorV {};
+            std::array<double, 7> mixerV {};
+            front.nodeVoltages(frontV.data());
+            gate.nodeVoltages(gateV.data());
+            resonator.nodeVoltages(resonatorV.data());
+            mixer.nodeVoltages(mixerV.data());
+            for (int k = 0; k < liveCount; ++k)
+            {
+                const auto& e = entries[static_cast<std::size_t>(k)];
+                const auto read = [&e](const auto& c, const double* v) -> double
+                {
+                    switch (e.kind)
+                    {
+                        case 0: return v[e.index];
+                        case 1: return c.portCurrent(e.index, v);
+                        case 2: return -(c.portCurrent(e.index, v) + c.portCurrent(e.index + 1, v));
+                        default:
+                        {
+                            // The pair's current i = Is (e^x - e^-x), nm to nv1; D80's own Is (e^x - 1), D81's
+                            // Is (e^-x - 1): their sum is 2 Is (cosh x - 1), cosh x from sinh x = i / 2 Is.
+                            const double i = c.portCurrent(e.index, v);
+                            const double s = i / (2.0 * germaniumSaturation);
+                            const double root = std::sqrt(1.0 + s * s);
+                            const double d80 = 0.5 * i + germaniumSaturation * s * s / (root + 1.0);
+                            return e.kind == 3 ? d80 : d80 - i;
+                        }
+                    }
+                };
+                double value = 0.0;
+                switch (e.stage)
+                {
+                    case 0: value = read(front, frontV.data()); break;
+                    case 1: value = read(gate, gateV.data()); break;
+                    case 2: value = read(resonator, resonatorV.data()); break;
+                    default: value = read(mixer, mixerV.data()); break;
+                }
+                out[k] = static_cast<float>(e.sign * value);
+            }
+        }
+
         // The stages' last outputs, for tests against the reference.
         [[nodiscard]] double triggerNodeVolts() const noexcept { return front.probe(frontTrigger); }
         [[nodiscard]] double pulseVolts() const noexcept { return front.probe(frontPulse); }
@@ -359,10 +504,10 @@ namespace coolsynth::synth::v3
             mixerOut = mixer.addProbe(4);
         }
 
-        wdf::Circuit<10, 18, 2, 0, 6, 3> front;
-        wdf::Circuit<9, 13, 3, 0, 2, 2> gate;
-        wdf::Circuit<11, 19, 1, 2, 3, 2> resonator;
-        wdf::Circuit<6, 7, 2, 1, 0, 1> mixer;
+        wdf::Circuit<10, 18, 2, 0, 6, 3, true> front; // Tapped: a panel reads its nodes and currents (D317)
+        wdf::Circuit<9, 13, 3, 0, 2, 2, true> gate;
+        wdf::Circuit<11, 19, 1, 2, 3, 2, true> resonator;
+        wdf::Circuit<6, 7, 2, 1, 0, 1, true> mixer;
 
         struct RestState
         {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 
@@ -107,6 +108,9 @@ namespace coolsynth::synth::v3
             usingFull = false;
             triggerSample = -1;
             sinceHit = 1 << 30;
+            ranFull = false;
+            tailSamples = 0;
+            c35AtHandover = full.portVoltage(c35);
             setRestInputs();
             readEnvelope(tail);
         }
@@ -148,6 +152,9 @@ namespace coolsynth::synth::v3
             }
             setEnvelopeSources(full);
             full.settle();
+            ranFull = false;
+            tailSamples = 0;
+            c35AtHandover = full.portVoltage(c35);
             mix.setInput(mixTop, top.probe(topOut));
             mix.setInput(mixMiddle, middle.probe(middleOut));
             mix.setInput(mixLow, low.probe(lowOut));
@@ -234,11 +241,14 @@ namespace coolsynth::synth::v3
                 setEnvelopeSources(full);
                 full.process();
                 readEnvelope(full);
+                ranFull = true; // the tap reads this sample from the full circuit, the handover's too
                 const int pulse = static_cast<int>(std::lround((pulseWidth + instrumentHold + settleSeconds) * sampleRate));
                 if (triggerSample < 0 && sinceHit > pulse)
                 {
                     tail.adoptSharedState(full); // the hit has passed: the trigger's parts are off
                     usingFull = false;
+                    c35AtHandover = full.portVoltage(c35); // for the tap: C35 recovers from here (D317)
+                    tailSamples = 0;
                 }
             }
             else
@@ -246,6 +256,9 @@ namespace coolsynth::synth::v3
                 setEnvelopeSources(tail);
                 tail.process();
                 readEnvelope(tail);
+                ranFull = false;
+                if (tailSamples < (1 << 30))
+                    ++tailSamples;
             }
         }
 
@@ -298,6 +311,144 @@ namespace coolsynth::synth::v3
         {
             return full.isWellPosed() && tail.isWellPosed() && top.isWellPosed() && middle.isWellPosed() && low.isWellPosed()
                    && mix.isWellPosed();
+        }
+
+        // ---- Its circuit as it runs, for a panel that draws it (CoolSynth's D317) ---------------------------------
+        // The node voltages and part currents its ngspice recording names (CoolSynth808's resources/lid), each from
+        // the stage the engine models it in; where a resistor joins two circuits a sample apart (R94, R90, R91, R104),
+        // from the VCA's side, whose source holds the envelope's node of this very sample. Signs as ngspice's: a part's
+        // current from its first node to its second, a transistor's into its leads, Q19's and Q18's with the junction
+        // capacitors the engine gives them (ngspice's take in their junctions). The envelopes from whichever circuit ran
+        // last; once a hit has passed and the tail runs (D262), the trigger's parts as they then stand: Q6, Q19 and the
+        // three diodes off, their nodes and currents 0, but for C35 (and Q19's collector with it), which recovers through
+        // R86 from where the handover left it, and Q19's emitter, which D7 and D8 leak into and D6 passes on, so it sits
+        // n VT ln 3 above C38. Q25 is an ideal follower and R126 (to the -15 V supply) is left out: its current is worked
+        // out from the emitter's volts (which lack Q25's Vbe, so it reads some 6 % high), Q25's emitter current from all
+        // its emitter feeds, its base current from betaF. Not here, as the engine leaves them out: the data line J6 and
+        // the switch Q2 with R3, R6 and its collector (R10 through Q2 is one part).
+        //
+        // Kinds: 0 a node, 1 a port's current, 2 a transistor's emitter from its base port, 3 Q19's base with its
+        // emitter junction, 4 its emitter, 5 Q18's base less its collector junction, 6 its collector with it, 7 the
+        // middle of a 2 MOhm bias (two 1 MOhm in the circuit), 8 a constant (the index its volts), 9 R126, 10 Q25's
+        // emitter, 11 its base, 12 its collector, 13 C35's node (or Q19's collector), 14 C35's current (or R86's), 15 Q19's
+        // emitter. Stages: 0 the envelopes (full or tail), 1 the top band, 2 the middle, 3 the low, 4 the mix.
+
+        static constexpr int liveCount = 164;
+        static constexpr std::array<const char*, liveCount> liveNames { "n100", "n102", "n125", "n35", "n37", "n51", "n55", "n56", "n58", "n5am", "n5ap", "n5bm", "n5bp", "n6bm", "n6bp", "n78", "n93", "n96", "na1", "nb16", "nb17", "nb18", "nb19", "nb1n", "nb25", "nb6", "nc16", "nc17", "nc18", "nc19", "ncy6", "ne16", "ne17", "ne18", "nh1", "nh2", "nhb", "nhp3", "nhpa", "nhpb", "nj", "nk", "nl", "nlb", "nm", "nmx", "nn", "np5", "ns", "nt", "nu", "nv", "nv2", "nw", "nx1", "nx3", "vcc", "vcy", "vee", "r10.i", "r15.i", "q6.ic", "q6.ib", "q6.ie", "r83.i", "r84.i", "q19.ic", "q19.ib", "q19.ie", "r85.i", "c35.i", "r86.i", "d6.id", "d7.id", "d8.id", "c38.i", "r87.i", "c37.i", "r94.i", "c40.i", "r88.i", "c39.i", "r90.i", "c41.i", "r93.i", "rvr2.i", "q20.ic", "q20.ib", "q20.ie", "r105.i", "c45.i", "r104.i", "r92.i", "r89.i", "r91.i", "c42.i", "r96.i", "r97.i", "q16.ic", "q16.ib", "q16.ie", "r95.i", "c36.i", "d5.id", "c47.i", "c44.i", "r100.i", "r99.i", "q17.ic", "q17.ib", "q17.ie", "r98.i", "c43.i", "d11.id", "c50.i", "c46.i", "r102.i", "r103.i", "q18.ic", "q18.ib", "q18.ie", "r101.i", "d12.id", "c49.i", "r106.i", "c53.i", "c54.i", "r109.i", "r108.i", "r111.i", "r110.i", "c51.i", "c52.i", "r113.i", "r107.i", "r115.i", "r114.i", "c48.i", "r124.i", "c59.i", "r127.i", "q25.ic", "q25.ib", "q25.ie", "r126.i", "c58.i", "r123.i", "c57.i", "r121.i", "c55.i", "r112.i", "r119.i", "rvr4a.i", "rvr4b.i", "r125.i", "c56.i", "r120.i", "r129.i", "c90.i", "r118.i", "r128.i", "c77.i", "c78.i", "rvr6.i" };
+        /** How long a hit's capture runs, as the recording: milliseconds. */
+        static constexpr double liveMs = 600.0;
+
+        /** The named values after the last sample, in liveNames' order, from the stages' own state (their taps). */
+        void tap(float* out) const noexcept
+        {
+            struct Entry { int stage, kind, index, sign; };
+            static constexpr std::array<Entry, liveCount> entries { {
+              { 2, 7, 2, 1 }, { 3, 7, 2, 1 }, { 4, 0, 6, 1 }, { 0, 13, 16, 1 }, { 0, 0, 3, 1 }, { 2, 0, 7, 1 }, { 4, 0, 4, 1 }, { 4, 0, 8, 1 },
+              { 4, 0, 9, 1 }, { 1, 0, 10, 1 }, { 1, 0, 9, 1 }, { 2, 0, 9, 1 }, { 2, 0, 8, 1 }, { 4, 0, 12, 1 }, { -1, 8, 0, 1 }, { 4, 0, 14, 1 },
+              { 0, 0, 7, 1 }, { 1, 7, 2, 1 }, { 4, 0, 5, 1 }, { 1, 0, 3, 1 }, { 2, 0, 3, 1 }, { 3, 0, 3, 1 }, { 0, 0, 14, 1 }, { 4, 0, 7, 1 },
+              { 3, 0, 8, 1 }, { 0, 0, 12, 1 }, { 1, 0, 4, 1 }, { 2, 0, 4, 1 }, { 3, 0, 4, 1 }, { 0, 13, 15, 1 }, { 0, 0, 13, 1 }, { 1, 0, 5, 1 },
+              { 2, 0, 5, 1 }, { 3, 0, 5, 1 }, { 1, 0, 6, 1 }, { 2, 0, 6, 1 }, { 1, 0, 1, 1 }, { 3, 0, 9, 1 }, { 1, 0, 11, 1 }, { 2, 0, 10, 1 },
+              { 0, 0, 2, 1 }, { 0, 15, 17, 1 }, { 0, 0, 4, 1 }, { 3, 0, 1, 1 }, { 0, 0, 5, 1 }, { 4, 0, 11, 1 }, { 0, 0, 10, 1 }, { 1, 0, 8, 1 },
+              { 0, 0, 8, 1 }, { 0, 0, 9, 1 }, { 3, 0, 6, 1 }, { 0, 0, 6, 1 }, { 0, 0, 11, 1 }, { 3, 0, 7, 1 }, { 1, 0, 7, 1 }, { 4, 0, 10, 1 },
+              { 1, 0, 2, 1 }, { 4, 0, 13, 1 }, { -1, 8, -15, 1 }, { 0, 1, 20, 1 }, { 0, 1, 19, 1 }, { 0, 1, 22, 1 }, { 0, 1, 21, 1 }, { 0, 2, 21, 1 },
+              { 0, 1, 23, 1 }, { 0, 1, 24, 1 }, { 0, 1, 26, 1 }, { 0, 3, 25, 1 }, { 0, 4, 25, 1 }, { 0, 1, 28, 1 }, { 0, 14, 29, 1 }, { 0, 14, 30, 1 },
+              { 0, 1, 31, 1 }, { 0, 1, 32, 1 }, { 0, 1, 33, 1 }, { 0, 1, 0, 1 }, { 0, 1, 1, 1 }, { 0, 1, 2, 1 }, { 1, 1, 8, -1 }, { 0, 1, 4, 1 },
+              { 0, 1, 5, 1 }, { 0, 1, 6, 1 }, { 2, 1, 8, -1 }, { 0, 1, 8, 1 }, { 0, 1, 9, 1 }, { 0, 1, 10, 1 }, { 0, 1, 12, 1 }, { 0, 1, 11, 1 },
+              { 0, 2, 11, 1 }, { 0, 1, 13, 1 }, { 0, 1, 14, 1 }, { 3, 1, 7, -1 }, { 0, 1, 16, 1 }, { 0, 1, 17, 1 }, { 2, 1, 9, 1 }, { 1, 1, 0, 1 },
+              { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 3, 1 }, { 1, 1, 2, 1 }, { 1, 2, 2, 1 }, { 1, 1, 4, 1 }, { 1, 1, 6, 1 }, { 1, 1, 5, 1 },
+              { 1, 1, 7, 1 }, { 2, 1, 0, 1 }, { 2, 1, 1, 1 }, { 2, 1, 1, 1 }, { 2, 1, 3, 1 }, { 2, 1, 2, 1 }, { 2, 2, 2, 1 }, { 2, 1, 4, 1 },
+              { 2, 1, 6, 1 }, { 2, 1, 5, 1 }, { 2, 1, 7, 1 }, { 3, 1, 0, 1 }, { 3, 1, 1, 1 }, { 3, 1, 1, 1 }, { 3, 6, 3, 1 }, { 3, 5, 2, 1 },
+              { 3, 2, 2, 1 }, { 3, 1, 4, 1 }, { 3, 1, 5, 1 }, { 1, 1, 9, 1 }, { 1, 1, 10, 1 }, { 1, 1, 11, 1 }, { 1, 1, 12, 1 }, { 1, 1, 13, 1 },
+              { 1, 1, 14, 1 }, { 1, 1, 15, 1 }, { 1, 1, 16, 1 }, { 2, 1, 10, 1 }, { 2, 1, 11, 1 }, { 2, 1, 12, 1 }, { 2, 1, 13, 1 }, { 2, 1, 14, 1 },
+              { 2, 1, 15, 1 }, { 3, 1, 8, 1 }, { 3, 1, 9, 1 }, { 3, 1, 10, 1 }, { 3, 1, 11, 1 }, { 3, 12, 9, 1 }, { 3, 11, 9, 1 }, { 3, 10, 9, 1 },
+              { 3, 9, 9, 1 }, { 4, 1, 8, 1 }, { 4, 1, 9, 1 }, { 4, 1, 10, 1 }, { 4, 1, 11, 1 }, { 4, 1, 0, 1 }, { 4, 1, 1, 1 }, { 4, 1, 2, 1 },
+              { 4, 1, 3, 1 }, { 4, 1, 4, 1 }, { 4, 1, 5, 1 }, { 4, 1, 6, 1 }, { 4, 1, 7, 1 }, { 4, 1, 12, 1 }, { 4, 1, 13, 1 }, { -1, 8, 0, 1 },
+              { 4, 1, 14, 1 }, { 4, 1, 15, 1 }, { 4, 1, 16, 1 }, { 4, 1, 17, 1 } } };
+            static constexpr int tailNodes = 10, tailPorts = 19; // the tail's: the full circuit's first
+            static constexpr double r86Ohms = 100.0, c35Seconds = 100.0 * 47.0e-6; // R86 and C35
+            static constexpr double r126Ohms = 22.0e3;
+            static constexpr double ln3 = 1.0986122886681098;
+            // each stage's node voltages, once
+            std::array<double, 18> envelopeV {};
+            std::array<double, 13> topV {};
+            std::array<double, 12> middleV {};
+            std::array<double, 10> lowV {};
+            std::array<double, 15> mixV {};
+            if (ranFull)
+                full.nodeVoltages(envelopeV.data());
+            else
+                tail.nodeVoltages(envelopeV.data());
+            top.nodeVoltages(topV.data());
+            middle.nodeVoltages(middleV.data());
+            low.nodeVoltages(lowV.data());
+            mix.nodeVoltages(mixV.data());
+            // C35 once the hit has passed: Q19 off, it recovers through R86 from where the handover left it.
+            const double c35Volts = supply - (supply - c35AtHandover) * std::exp(-static_cast<double>(tailSamples) / (sampleRate * c35Seconds));
+            // Q25's emitter: R126 to -15 V, C58 on into the mix, less what R124 brings in.
+            const double r126Amps = (lowV[9] + supply) / r126Ohms;
+            const double q25Emitter = -(r126Amps + mix.portCurrent(8, mixV.data()) - low.portCurrent(9, lowV.data()));
+            const double q25Base = -q25Emitter / (betaF + 1.0);
+
+            const auto read = [](const auto& c, const double* v, const Entry& e) -> double
+            {
+                switch (e.kind)
+                {
+                    case 0: return v[e.index];
+                    case 1: return c.portCurrent(e.index, v);
+                    case 2: return -(c.portCurrent(e.index, v) + c.portCurrent(e.index + 1, v));
+                    case 7: return 0.5 * (v[e.index] + v[e.index + 1]);
+                    default: return 0.0;
+                }
+            };
+            const auto envelope = [&](const Entry& e) -> double
+            {
+                const double* v = envelopeV.data();
+                if (ranFull)
+                {
+                    switch (e.kind)
+                    {
+                        case 3: return full.portCurrent(e.index, v) + full.portCurrent(q19Junction, v);
+                        case 4: return -(full.portCurrent(e.index, v) + full.portCurrent(e.index + 1, v) + full.portCurrent(q19Junction, v));
+                        case 13: case 15: return v[e.index];
+                        case 14: return full.portCurrent(e.index, v);
+                        default: return read(full, v, e);
+                    }
+                }
+                switch (e.kind)
+                {
+                    case 13: return c35Volts;
+                    case 14: return (supply - c35Volts) / r86Ohms; // R86's, all into C35
+                    case 15: return v[2] + diodeThermal * ln3;     // above C38
+                    case 0: return e.index <= tailNodes ? v[e.index] : 0.0;
+                    default: return e.index < tailPorts ? read(tail, v, e) : 0.0; // the trigger's parts (kinds 3, 4 too): off
+                }
+            };
+            for (int k = 0; k < liveCount; ++k)
+            {
+                const auto& e = entries[static_cast<std::size_t>(k)];
+                double value = 0.0;
+                switch (e.stage)
+                {
+                    case 0: value = envelope(e); break;
+                    case 1: value = read(top, topV.data(), e); break;
+                    case 2: value = read(middle, middleV.data(), e); break;
+                    case 3:
+                        switch (e.kind)
+                        {
+                            case 5: value = low.portCurrent(e.index, lowV.data()) - low.portCurrent(q18Junction, lowV.data()); break;
+                            case 6: value = low.portCurrent(e.index, lowV.data()) + low.portCurrent(q18Junction, lowV.data()); break;
+                            case 9: value = r126Amps; break;
+                            case 10: value = q25Emitter; break;
+                            case 11: value = q25Base; break;
+                            case 12: value = -q25Emitter - q25Base; break;
+                            default: value = read(low, lowV.data(), e); break;
+                        }
+                        break;
+                    case 4: value = read(mix, mixV.data(), e); break;
+                    default: value = static_cast<double>(e.index); break; // the constants
+                }
+                out[k] = static_cast<float>(e.sign * value);
+            }
         }
 
     private:
@@ -392,9 +543,9 @@ namespace coolsynth::synth::v3
             c.addResistor(13, 0, 22.0e3);                                                 // R83
             c.addResistor(13, 14, 10.0e3);                                                // R84
             c.addTransistor(15, 14, 17, transistorSaturation, betaF, betaR, thermal);     // Q19
-            c.addCapacitor(14, 17, junctionEmitter);                                      // its emitter junction (Q19 and the diodes)
+            q19Junction = c.addCapacitor(14, 17, junctionEmitter);                        // its emitter junction (Q19 and the diodes)
             c.addResistor(15, 16, 100.0);                                                 // R85
-            c.addCapacitor(16, 0, 47.0e-6);                                               // C35
+            c35 = c.addCapacitor(16, 0, 47.0e-6);                                         // C35
             c.addResistor(1, 16, 100.0);                                                  // R86
             c.addDiode(17, 2, diodeSaturation, diodeThermal);                             // D6
             c.addDiode(17, 4, diodeSaturation, diodeThermal);                             // D7
@@ -464,7 +615,7 @@ namespace coolsynth::synth::v3
         void buildLow()
         {
             c46 = buildGate(low, lowBandIn, lowSupply);
-            low.addCapacitor(4, 3, junctionCollector);                                     // Q18's collector junction (Q18 and D12)
+            q18Junction = low.addCapacitor(4, 3, junctionCollector);                       // Q18's collector junction (Q18 and D12)
             r104Vca = low.addSource(6, 0, 22.0e3);                                         // R104, from C45
             low.addCapacitor(6, 7, 1.5e-9);                                                // C48
             low.addResistor(7, 9, 22.0e3);                                                 // R124
@@ -505,12 +656,12 @@ namespace coolsynth::synth::v3
             mixOut = mix.addProbe(13);
         }
 
-        wdf::Circuit<17, 34, 2, 0, 9, 6> full;
-        wdf::Circuit<10, 19, 1, 0, 2, 5> tail;
-        wdf::Circuit<12, 19, 2, 1, 3, 3> top;
-        wdf::Circuit<11, 18, 2, 1, 3, 3> middle;
-        wdf::Circuit<9, 12, 2, 1, 3, 3> low;
-        wdf::Circuit<14, 18, 3, 1, 0, 1> mix;
+        wdf::Circuit<17, 34, 2, 0, 9, 6, true> full; // Tapped: a panel reads its nodes and currents (D317)
+        wdf::Circuit<10, 19, 1, 0, 2, 5, true> tail;
+        wdf::Circuit<12, 19, 2, 1, 3, 3, true> top;
+        wdf::Circuit<11, 18, 2, 1, 3, 3, true> middle;
+        wdf::Circuit<9, 12, 2, 1, 3, 3, true> low;
+        wdf::Circuit<14, 18, 3, 1, 0, 1, true> mix;
 
         struct RestState
         {
@@ -559,5 +710,10 @@ namespace coolsynth::synth::v3
         int middleBand = 0, middleSupply = 0, c44 = 0, r90Vca = 0, r91Vca = 0, c51 = 0, c52 = 0, h2Probe = 0, middleOut = 0;
         int lowBandIn = 0, lowSupply = 0, c46 = 0, r104Vca = 0, uProbe = 0, lowOut = 0;
         int mixTop = 0, mixMiddle = 0, mixLow = 0, vr4Top = 0, vr4Rest = 0, vr6 = 0, mixOut = 0;
+        // For the tap (D317): C35's and the two junctions' ports, which envelope ran last, and C35 from the handover on.
+        int c35 = 0, q19Junction = 0, q18Junction = 0;
+        bool ranFull = false;
+        int tailSamples = 0;          // the tail's samples since the handover
+        double c35AtHandover = supply; // C35's volts as the full circuit left it
     };
 }

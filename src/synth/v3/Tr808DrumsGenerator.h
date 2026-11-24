@@ -131,10 +131,7 @@ namespace coolsynth::synth::v3
             pendingOther.fill(false);
             pendingVelocity.fill(1.0f);
             running.fill(false);
-            if (capturing != nullptr) // a capture under way ends with the reset (D317)
-            {
-                capturing = nullptr;
-            }
+            capture.stop(); // a capture under way ends with the reset (D317)
             level.fill(0.0);
             shedding.fill(false);
             shedGain.fill(1.0);
@@ -206,18 +203,14 @@ namespace coolsynth::synth::v3
                     {
                         bass.trigger(volts);
                         // A panel watching the bass drum's circuit captures this hit (CoolSynth's D317).
-                        if (params.watch != nullptr && params.watch->beginCapture(CircuitWatch::bassDrum, Tr808BassDrum::liveNames.data(), Tr808BassDrum::liveCount))
-                        {
-                            capturing = params.watch;
-                            captureFrame = 0;
-                            captureSample = 0;
-                        }
+                        capture.begin<Tr808BassDrum>(params.watch, CircuitWatch::bassDrum, bassDrum);
                     }
                     else if (k == rimPair)
                     {
                         if (rim.claves() != pendingOther[i])
                             rim.setClaves(pendingOther[i]);
                         rim.trigger(volts);
+                        capture.begin<Tr808RimShot>(params.watch, CircuitWatch::rimShot, rimPair);
                     }
                     else
                     {
@@ -225,6 +218,7 @@ namespace coolsynth::synth::v3
                         if (t.conga() != pendingOther[i])
                             t.setConga(pendingOther[i]);
                         t.trigger(volts);
+                        capture.begin<Tr808Tom>(params.watch, CircuitWatch::lowTom + (k - lowPair), k);
                     }
                     running[i] = true;
                     shedding[i] = false;
@@ -247,13 +241,21 @@ namespace coolsynth::synth::v3
                     if (k == bassDrum)
                     {
                         y = bass.process();
-                        if (capturing != nullptr)
-                            captureBass();
+                        if (capture.instrument() == bassDrum)
+                            capture.after(bass, sampleRate);
                     }
                     else if (k == rimPair)
+                    {
                         y = rim.process();
+                        if (capture.instrument() == rimPair)
+                            capture.after(rim, sampleRate);
+                    }
                     else
+                    {
                         y = toms[i - 1].process(pink);
+                        if (capture.instrument() == k)
+                            capture.after(toms[i - 1], sampleRate);
+                    }
                     y *= circuitVoltsToLevel;
                     if (shedding[i])
                     {
@@ -311,27 +313,6 @@ namespace coolsynth::synth::v3
                     if (running[static_cast<std::size_t>(k)])
                         params.watch->raise(lights[static_cast<std::size_t>(k)], static_cast<float>(level[static_cast<std::size_t>(k)]));
                 params.watch->reported();
-            }
-        }
-
-        // ---- The bass drum's circuit captured for a panel (CoolSynth's D317) --------------------------------------
-        static_assert(Tr808BassDrum::liveCount <= CircuitWatch::captureSeries, "and its frames its series");
-
-        /** After a sample of a captured hit: a frame every 4 samples for the first 8 ms, then every 0.5 ms, to 300 ms. */
-        void captureBass() noexcept
-        {
-            const double ms = 1000.0 * static_cast<double>(captureSample) / sampleRate;
-            const long stride = std::max<long>(1, std::lround(0.0005 * sampleRate));
-            if ((ms < 8.0 ? captureSample % 4 == 0 : captureSample % stride == 0) && captureFrame < CircuitWatch::captureFrames)
-            {
-                bass.tap(capturing->frame(captureFrame));
-                capturing->frameWritten(captureFrame, static_cast<float>(ms));
-                ++captureFrame;
-            }
-            ++captureSample;
-            if (ms >= 300.0 || captureFrame >= CircuitWatch::captureFrames)
-            {
-                capturing = nullptr;
             }
         }
 
@@ -449,9 +430,7 @@ namespace coolsynth::synth::v3
         std::array<Tr808Tom, 3> toms { Tr808Tom(Tr808Tom::Pair::low), Tr808Tom(Tr808Tom::Pair::mid), Tr808Tom(Tr808Tom::Pair::high) };
         Tr808RimShot rim;
         std::array<bool, instrumentCount> pending {}, pendingOther {}, running {};
-        CircuitWatch* capturing = nullptr; // the watch a hit of the bass drum is being captured into (D317)
-        int captureFrame = 0;
-        long captureSample = 0;
+        CircuitCapture capture; // a hit's circuit captured for a panel (D317)
         std::array<float, instrumentCount> pendingVelocity {};
         std::array<double, instrumentCount> level {}, sinceHit {};
         std::array<bool, instrumentCount> shedding {}; // the overload's emergency fades it out (D258)

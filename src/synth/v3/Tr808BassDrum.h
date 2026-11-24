@@ -340,6 +340,7 @@ namespace coolsynth::synth::v3
         // and the select line's R152, R153 and Q39.
 
         static constexpr int liveCount = 86;
+        static constexpr double liveMs = 300.0; // as long as its recording runs
         static constexpr std::array<const char*, liveCount> liveNames { "nb32", "vcc", "trig", "nb40", "vin", "npulse", "nb41", "nc41", "neg", "nd52", "ntop", "nb43", "nmid", "ninv", "nout", "ninv2", "nvr6", "nfb", "nplus2", "na", "nb", "nc", "nw", "nd", "nb44", "ne44", "vout", "q32.ib", "q32.ic", "q32.ie", "r113.i", "r155.i", "r154.i", "q40.ib", "q40.ic", "q40.ie", "c40.i", "r163.i", "r162.i", "d53.id", "r157.i", "r158.i", "r156.i", "c38.i", "r160.i", "q41.ib", "q41.ic", "q41.ie", "q42.ib", "q42.ic", "q42.ie", "c39.i", "r161.i", "r159.i", "r166.i", "r165.i", "c41.i", "c42.i", "r167.i", "r164.i", "rvr6.i", "c43.i", "r169.i", "r168.i", "r170.i", "q43.ib", "q43.ic", "q43.ie", "d52.id", "r171.i", "r172.i", "rvr5.i", "c45.i", "c47.i", "rvr4t.i", "rvr4b.i", "c49.i", "r177.i", "r176.i", "q44.ib", "q44.ie", "q44.ic", "r173.i", "c48.i", "c50.i", "r174.i" };
 
         /** The named values after the last sample, in liveNames' order, from the stages' own state (their taps). */
