@@ -46,7 +46,7 @@ namespace coolsynth::synth::v3
         static constexpr double chipSaturation = 1.0e-15, chipBetaF = 150.0;               // the BA662's NPNs
         static constexpr double controlRate = 48000.0; // near which it runs: a quarter of 192 kHz, half of 96 kHz
 
-        /** devilFish: R123 refills C42 from an input of its own (the volume envelope's sustain; CoolSynth's D308), not
+        /** devilFish: R123 refills C42 from an input of its own (the volume envelope's sustain; CoolSynth's D309), not
             from the 12 V rail; off, the circuit is the stock one, part for part. */
         explicit Tb303Envelope(bool devilFish = false) : fish(devilFish)
         {
@@ -55,7 +55,7 @@ namespace coolsynth::synth::v3
             build();
         }
 
-        /** The Devil Fish's envelopes (CoolSynth's D308), on a Devil Fish only:
+        /** The Devil Fish's envelopes (CoolSynth's D309), on a Devil Fish only:
                 normalOhms, accentOhms  the main envelope's decay resistance (R138 and the decay pot) on plain and
                                         accented notes: Normal Decay and Accent Decay, where the stock one shorts DECAY
                 vegOhms                 R123: the volume envelope's decay (C42's refill)

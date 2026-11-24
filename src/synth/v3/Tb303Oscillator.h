@@ -89,7 +89,7 @@ namespace coolsynth::synth::v3
             shaper.setCapacitance(cC11, c11);
         }
 
-        /** The Devil Fish's Slide Time (CoolSynth's D308): resistance in series with the ladder's 100 kOhm (its 3.3k
+        /** The Devil Fish's Slide Time (CoolSynth's D309): resistance in series with the ladder's 100 kOhm (its 3.3k
             protection and a 500k pot), so C35 charges slower in a slide. 0 is the stock ladder. */
         void setSlideOhms(double extra) noexcept { pitch.setResistance(rLadder, 100.0e3 + std::max(extra, 0.0)); }
 

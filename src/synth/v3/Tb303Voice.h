@@ -29,7 +29,7 @@ namespace coolsynth::synth::v3
         static constexpr double rate = 96000.0;
         static constexpr double tm3 = 0.35, tm4 = 0.5687, tm5 = 0.7389, c11 = 0.82e-6;
 
-        /** devilFish: the voice with Robin Whittle's Devil Fish modifications (CoolSynth's D308); off, the stock
+        /** devilFish: the voice with Robin Whittle's Devil Fish modifications (CoolSynth's D309); off, the stock
             TB-303, part for part as before. */
         explicit Tb303Voice(bool devilFish = false)
             : osc(std::make_unique<Tb303Oscillator>()), filter(std::make_unique<Tb303Filter>(true, devilFish)),

@@ -47,7 +47,7 @@ namespace coolsynth::synth::v3
 
         /** loadedByVca: the RESONANCE wiper also feeds the VCA (C22, R122 into its pin 3, at 5.333 V as AC ground), as in
             the whole voice (D295); off, the wiper as vcf.cir has it alone. devilFish: a current into Q10's base, the
-            control's summing node, for the Devil Fish's Filter Tracking and Filter FM (CoolSynth's D308); off, the
+            control's summing node, for the Devil Fish's Filter Tracking and Filter FM (CoolSynth's D309); off, the
             circuit is the stock one, part for part. */
         explicit Tb303Filter(bool loadedByVca = false, bool devilFish = false)
         {
@@ -66,7 +66,7 @@ namespace coolsynth::synth::v3
             fish = devilFish;
         }
 
-        /** The Devil Fish's changes to the stock parts (Whittle's manual, the x0xb0x mod guide; CoolSynth's D308), all
+        /** The Devil Fish's changes to the stock parts (Whittle's manual, the x0xb0x mod guide; CoolSynth's D309), all
             back to the stock values with the defaults:
                 inputGain   R62 as 220k over it (0 opens it: no oscillator into the filter; 66.6 at most)
                 wideRanges  Env Mod to zero and three times (R61 shorted, R63 with 100k across), Cut Off lower and

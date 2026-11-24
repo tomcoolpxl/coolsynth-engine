@@ -10,7 +10,7 @@
 #include "synth/v3/Tb303Voice.h"
 
 /*
-    The Devil Fish (CoolSynth's D308): Robin Whittle's modifications to the TB-303 as changes to the engine's circuit
+    The Devil Fish (CoolSynth's D309): Robin Whittle's modifications to the TB-303 as changes to the engine's circuit
     (part values, a current into the filter's control, a sustain input on the volume envelope) and, where he never
     published his circuit, simple stand-ins around it (Soft Attack, Muffler). Each control measured against the times
     and ranges of his manual (2019); the stock voice is left as it was, which the SPICE tests ("TB-303 circuit") hold.

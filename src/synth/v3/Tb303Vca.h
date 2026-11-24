@@ -58,7 +58,7 @@ namespace coolsynth::synth::v3
             buffer.setSampleRate(rate);
         }
 
-        /** The Devil Fish's fuller bass (CoolSynth's D308): C21, the filter's coupling into pin 3, at 0.1 uF, not
+        /** The Devil Fish's fuller bass (CoolSynth's D309): C21, the filter's coupling into pin 3, at 0.1 uF, not
             0.01 uF (32 Hz down 1 dB, not 5 dB, as Whittle measures it). */
         void setFullBass(bool on) noexcept { chip.setCapacitance(cC21, on ? 0.1e-6 : 0.01e-6); }
 
