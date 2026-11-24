@@ -6,7 +6,8 @@ plain note against the recording's.
 Din Sync's chart: SET-A1 to A5 turn CUTOFF, RESONANCE, ENV MOD, DECAY, ACCENT from 25 to 100 % with the others at
 0 %; sets B, C, D and E the same with the others at 25, 50, 75 and 100 %.
 
-Usage: python -I tools/tb303/compare_sets.py <folder> A2 [A3 ...] [--tm3 0.35] [--c11 0.82u] [--jobs 8]
+Usage: python -I tools/tb303/compare_sets.py <folder> A2 [A3 ...] [--tm3 0.35] [--c11 0.82u] [--jobs 8] [--model exe]
+--model compares the engine's voice instead (D295), rendered by a program as render() describes.
 """
 import argparse
 import concurrent.futures
@@ -31,7 +32,13 @@ def knobs_for(name, position):
     return values
 
 
-def render(values, accented, tm3, c11, out):
+def render(values, accented, tm3, c11, out, model=None):
+    if model:
+        # The engine's voice (D295): a program taking "csv cutoff res envmod decay accent accented out.csv" that writes
+        # time,nout for low C, the gate at 0.4 s for 0.25 s, the trimmers as fitted.
+        command = [model, "csv"] + ["{}".format(values[k]) for k in KNOBS] + [str(int(accented)), out]
+        subprocess.run(command, check=True, capture_output=True)
+        return
     command = [sys.executable, "-I", os.path.join(HERE, "render.py"), "voice.cir", "--nodes", "nout", "--tend", "0.6",
                "--step", "4e-6", "--out", out]
     sets = dict(values, cv=2.0, sq=0, ton=TON, toff=TON + 0.25, taoff=TON + 0.25, acc=12 if accented else 0, tm3=tm3,
@@ -79,6 +86,7 @@ def main():
     p.add_argument("--tm3", default="0.35")
     p.add_argument("--c11", default="0.82u")
     p.add_argument("--jobs", type=int, default=8)
+    p.add_argument("--model", help="the engine's voice as a program (see render()); ngspice's voice.cir if left out")
     a = p.parse_args()
     tmp = tempfile.mkdtemp()
     jobs = []
@@ -87,7 +95,7 @@ def main():
             for accented in (False, True):
                 jobs.append((s, pos, accented, os.path.join(tmp, "{}_{}_{}.csv".format(s, pos, int(accented)))))
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as pool:
-        list(pool.map(lambda j: render(knobs_for(j[0], j[1]), j[2], a.tm3, a.c11, j[3]), jobs))
+        list(pool.map(lambda j: render(knobs_for(j[0], j[1]), j[2], a.tm3, a.c11, j[3], a.model), jobs))
     for s in a.sets:
         print("SET-{} ({} turned, the others at {:.0f} %):".format(s, KNOBS[int(s[1]) - 1], 100 * BASE[s[0]]))
         for pos in range(1, 5):

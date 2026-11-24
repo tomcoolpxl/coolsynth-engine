@@ -84,6 +84,10 @@ namespace coolsynth::synth::v3
             circuit.setResistance(sAccentPass, on ? switchOn : switchOff);
         }
 
+        /** The current the filter's D24 draws from the ACCENT knob's wiper (Tb303Filter::accentCurrent), taken at the
+            next step: in the whole voice it loads the wiper (up to some 100 uA from a 50 kOhm pot; D295). */
+        void setAccentLoad(double amps) noexcept { accentLoadAmps = amps; }
+
         /** At rest with the gate low. */
         void settle() noexcept
         {
@@ -141,6 +145,8 @@ namespace coolsynth::synth::v3
             circuit.setInput(inReference, reference);
             circuit.setInput(inGate, gateVolts);
             circuit.setInput(inVq9, vq9);
+            // The accent's load as a current behind 1 GOhm, its volts from the wiper's last voltage.
+            circuit.setSource(sAccentLoad, circuit.probe(pAccent) - accentLoadAmps * leakOhms);
         }
 
         void read(double* out) const noexcept
@@ -213,6 +219,7 @@ namespace coolsynth::synth::v3
             rAccentTop = circuit.addResistor(22, 23, 25.0e3);                                    // ACCENT above its wiper
             rAccentBottom = circuit.addResistor(23, 0, 25.0e3);                                  // and below
             circuit.addResistor(23, 24, 47.0e3);                                                 // R119
+            sAccentLoad = circuit.addSource(23, 0, leakOhms);                                    // D24's current (setAccentLoad)
             circuit.addCapacitor(24, 0, 0.033e-6);                                               // C36
             circuit.addResistor(24, 25, 22.0e3);                                                 // R120
             diode(25, 26);                                                                       // D27
@@ -250,9 +257,9 @@ namespace coolsynth::synth::v3
         }
 
         static constexpr double leakOhms = 1.0e9;
-        // 65 ports: 39 parts (4 leaks) and 26 nonlinear (8 transistors, 12 one-ports: diodes, D27, Q1A, Q39, three
-        // recombination diodes)
-        wdf::Circuit<35, 65, 4, 0, 26, 7> circuit;
+        // 66 ports: 40 parts (4 leaks, the accent's load) and 26 nonlinear (8 transistors, 12 one-ports: the diodes,
+        // D27, Q1A, Q39, three recombination diodes)
+        wdf::Circuit<35, 66, 4, 0, 26, 7> circuit;
 
         double sampleRate = 192000.0, gateVolts = 0.0;
         bool accented = false;
@@ -260,6 +267,7 @@ namespace coolsynth::synth::v3
         double now[outputs] {}, before[outputs] {}, value[outputs] {};
         int inSupply = 0, inReference = 0, inGate = 0, inVq9 = 0;
         int rDecay = 0, sDecayShort = 0, sAccentPass = 0, rAccentTop = 0, rAccentBottom = 0;
-        int pEnv = 0, pAccent = 0, pGate = 0, pPin1 = 0, pC62 = 0, pC42 = 0, pOneShot = 0;
+        int pEnv = 0, pAccent = 0, pGate = 0, pPin1 = 0, pC62 = 0, pC42 = 0, pOneShot = 0, sAccentLoad = 0;
+        double accentLoadAmps = 0.0;
     };
 }

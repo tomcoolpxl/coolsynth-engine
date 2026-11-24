@@ -45,13 +45,28 @@ namespace coolsynth::synth::v3
         static constexpr double sourceOhms = 1.0e9; // the current sources' Norton resistance
         static constexpr double leakOhms = 1.0e9;   // across each rung, as SPICE's GMIN
 
-        Tb303Filter()
+        /** loadedByVca: the RESONANCE wiper also feeds the VCA (C22, R122 into its pin 3, at 5.333 V as AC ground), as in
+            the whole voice (D295); off, the wiper as vcf.cir has it alone. */
+        explicit Tb303Filter(bool loadedByVca = false)
         {
             converter.setNewtonLimit(40);
             loop.setNewtonLimit(40);
             setJacobianReuse(true);
             buildConverter();
             buildLoop();
+            if (loadedByVca)
+            {
+                loop.addCapacitor(27, 34, 0.01e-6); // the VCA's C22
+                loop.addResistor(34, 2, 100.0e3);   // and R122, into pin 3
+            }
+        }
+
+        /** The RESONANCE wiper's voltage (the VCA's second input). */
+        [[nodiscard]] double resonanceWiper() const noexcept { return loop.probe(pResWiper); }
+        /** The current D24 draws from the ACCENT knob's wiper (into R46): the envelope's load. */
+        [[nodiscard]] double accentCurrent() const noexcept
+        {
+            return (converter.probe(pD24) - converter.probe(pR46)) / 47.0e3;
         }
 
         /** The chord method on both circuits (D281), on by default; off solves each sample exactly, for the tests. */
@@ -217,6 +232,8 @@ namespace coolsynth::synth::v3
             pNc11 = converter.addProbe(10);
             pN13 = converter.addProbe(19);
             pVq9 = converter.addProbe(7);
+            pD24 = converter.addProbe(16);
+            pR46 = converter.addProbe(17);
         }
 
         // Loop: 1 the 12 V rail, 2 5.333 V, 3 the VCO's output (inputs); 4 the filter's own rail (R95), 5 after R62,
@@ -293,15 +310,16 @@ namespace coolsynth::synth::v3
             pR4 = loop.addProbe(16);
             pNe12 = loop.addProbe(18);
             pNe21 = loop.addProbe(24);
+            pResWiper = loop.addProbe(27);
         }
 
-        wdf::Circuit<19, 26, 5, 0, 7, 5> converter;
-        wdf::Circuit<33, 68, 3, 0, 22, 6> loop; // 68 ports, counted from buildLoop
+        wdf::Circuit<19, 26, 5, 0, 7, 7> converter;
+        wdf::Circuit<34, 69, 3, 0, 22, 7> loop; // 67 ports counted from buildLoop, 2 more loaded by the VCA
 
         double tailAmps = 0.5e-3, collectorAmps = 0.0, lastNe12 = 4.8, lastNe21 = 2.9;
         int convSupply = 0, convReference = 0, convEnvelope = 0, convAccent = 0, convNe12 = 0;
         int rCut3 = 0, rCut1 = 0, rTm3 = 0, rEnv3 = 0, rEnv1 = 0, rResB1 = 0, rResB3 = 0;
-        int pNb10 = 0, pNb11 = 0, pNc11 = 0, pN13 = 0, pVq9 = 0;
+        int pNb10 = 0, pNb11 = 0, pNc11 = 0, pN13 = 0, pVq9 = 0, pD24 = 0, pR46 = 0, pResWiper = 0;
         int loopSupply = 0, loopReference = 0, loopIn = 0, sTail = 0, sCollector = 0, rResA3 = 0, rResA1 = 0;
         int pTp6 = 0, pVcf = 0, pL4 = 0, pR4 = 0, pNe12 = 0, pNe21 = 0;
     };

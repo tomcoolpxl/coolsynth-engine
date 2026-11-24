@@ -319,13 +319,26 @@ namespace coolsynth::synth::v3
         /** Q26's right collector current, through the 1 kOhm it is read across (from the 8 V it is held at). */
         double rampCurrent() const noexcept { return (collectorVolts - pitch.probe(pCollector)) / senseOhms; }
 
-        /** Where the thyristor fires: 5.35 V at the top notes to 5.37 V at the lowest (ngspice, vco.cir). */
+        /**
+            Where the thyristor fires, in effect: 5.349 to 5.366 V by the ramp's current, between nine notes by log
+            current (D295). Each the threshold that gives vco.cir's period at its note (low C to high C by half
+            octaves, 192 kHz renders): measured at three notes alone, the notes between ran 0.3 to 0.6 cents sharp.
+        */
         double threshold() const noexcept
         {
-            // Measured at 1.88, 6.33 and 29 uA (C1, A2, C5): 5.3656, 5.3519, 5.3507 V; between them by log current.
-            const double x = std::log(std::clamp(current, 1.88e-6, 29.0e-6));
-            const double a = std::log(1.88e-6), b = std::log(6.33e-6), c = std::log(29.0e-6);
-            return x < b ? 5.3656 + (5.3519 - 5.3656) * (x - a) / (b - a) : 5.3519 + (5.3507 - 5.3519) * (x - b) / (c - b);
+            static constexpr double amps[] = { 1.8797e-6, 2.6597e-6, 3.7633e-6, 5.3248e-6, 7.5339e-6,
+                                               10.6592e-6, 15.0800e-6, 21.3327e-6, 30.1748e-6 };
+            static constexpr double volts[] = { 5.36543, 5.35995, 5.35580, 5.35282, 5.35085, 5.34974, 5.34940, 5.34979, 5.35098 };
+            constexpr int count = 9;
+            if (current <= amps[0])
+                return volts[0];
+            if (current >= amps[count - 1])
+                return volts[count - 1];
+            int k = 0;
+            while (current > amps[k + 1])
+                ++k;
+            const double w = std::log(current / amps[k]) / std::log(amps[k + 1] / amps[k]);
+            return volts[k] + w * (volts[k + 1] - volts[k]);
         }
 
         /** Q28's source with R105 alone: Vs / R105 = beta (Vg - Vs - Vp)^2 (1 + lambda (Vdd - Vs)), by Newton. */

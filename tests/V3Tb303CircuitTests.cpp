@@ -11,6 +11,7 @@
 #include "synth/v3/Tb303Filter.h"
 #include "synth/v3/Tb303Oscillator.h"
 #include "synth/v3/Tb303Vca.h"
+#include "synth/v3/Tb303Voice.h"
 
 #include <complex>
 
@@ -560,6 +561,135 @@ public:
                 line << " | at the end " << juce::String(endEnv * 1.0e3, 1) << " mV, C42 " << juce::String(endC42 * 1.0e3, 1)
                      << " mV | envelope " << juce::String(100.0 * envelopeSeconds * rate / static_cast<double>(n), 1)
                      << " %, VCA " << juce::String(100.0 * vcaSeconds * rate / static_cast<double>(n), 1) << " % of real time";
+                logMessage(line);
+            }
+        }
+
+        beginTest("the_voice_matches_spice");
+        {
+            // tools/tb303/voice.cir, the whole voice (D295), at low C (2 V), the gate from 50 to 300 ms, the trimmers
+            // as fitted: a plain saw with every knob at half, an accented square, a resonant saw (cutoff 30 %,
+            // resonance full, env mod 70 %). Judged as heard: the pitch, the output's loudness in 5 ms blocks and its
+            // harmonics 2 to 12 against the fundamental 100 ms into the note (a sample-by-sample comparison after a
+            // resonant filter only measures a phase drift).
+            using coolsynth::synth::v3::Tb303Voice;
+            Tb303Voice::Knobs half;
+            Tb303Voice::Knobs square = half;
+            square.square = true;
+            Tb303Voice::Knobs resonant = half;
+            resonant.cutoff = 0.3;
+            resonant.resonance = 1.0;
+            resonant.envMod = 0.7;
+            struct VoiceCase
+            {
+                const char* file;
+                Tb303Voice::Knobs knobs;
+                bool accented;
+            };
+            const VoiceCase cases[] = { { "voice_saw.csv", half, false },
+                                        { "voice_square_accent.csv", square, true },
+                                        { "voice_resonant.csv", resonant, false } };
+            constexpr double note = 2.0, gateOn = 0.05, gateOff = 0.3;
+            for (const auto& c : cases)
+            {
+                const auto file = referenceFolder().getChildFile(c.file);
+                if (! file.existsAsFile())
+                {
+                    expect(false, juce::String("the SPICE reference is missing: ") + c.file);
+                    continue;
+                }
+                const auto ref = loadReference(file);
+                const std::size_t n = ref.size();
+                auto voice = std::make_unique<Tb303Voice>();
+                expect(voice->fitsItsLimits(), "the voice's circuits fit their templates");
+                voice->prepare(ref.rate);
+                voice->setKnobs(c.knobs);
+                voice->settle(note);
+                std::vector<double> out(n), wave(n);
+                bool converged = true;
+                const auto start = std::chrono::steady_clock::now();
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    const double t = static_cast<double>(i) / ref.rate;
+                    const bool gate = t > gateOn && t < gateOff;
+                    out[i] = voice->process(note, gate, c.accented && gate, false);
+                    wave[i] = voice->waveform();
+                    converged = converged && voice->lastSolveConverged();
+                }
+                const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+                expect(converged, juce::String(c.file) + ": every sample converged");
+                const auto& spiceOut = ref.columns.at("nout");
+                const auto& spiceWave = ref.columns.at("nwave");
+                juce::String line = juce::String(c.file) + ":";
+
+                // The pitch, from the waveform's own period (the saw's falls through 8 V, the square's rises through 7 V).
+                auto period = [&](const std::vector<double>& w, std::size_t from, int count, double& first)
+                {
+                    std::vector<double> t;
+                    for (std::size_t i = from; i < w.size() && static_cast<int>(t.size()) < count; ++i)
+                    {
+                        const double level = c.knobs.square ? 7.0 : 8.0;
+                        const bool hit = c.knobs.square ? (w[i - 1] < level && w[i] >= level)
+                                                        : (w[i - 1] > level && w[i] <= level && w[i - 1] - w[i] < 1.0);
+                        if (hit)
+                            t.push_back(static_cast<double>(i - 1) + (level - w[i - 1]) / (w[i] - w[i - 1]));
+                    }
+                    first = t.empty() ? 0.0 : t.front();
+                    return t.size() < 2 ? 0.0 : (t.back() - t.front()) / static_cast<double>(t.size() - 1);
+                };
+                double firstModel = 0.0, firstSpice = 0.0;
+                const auto from = static_cast<std::size_t>((gateOn + 0.1) * ref.rate);
+                const double pm = period(wave, from, 6, firstModel), ps = period(spiceWave, from, 6, firstSpice);
+                const double cents = 1200.0 * std::log2(ps / std::max(1.0e-9, pm));
+                expectLessThan(std::abs(cents), 0.5, juce::String(c.file) + ": the pitch");
+                line << " pitch " << juce::String(cents, 2) << " cents;";
+
+                // The loudness in 5 ms blocks where SPICE's is within 40 dB of its loudest.
+                const auto block = static_cast<std::size_t>(0.005 * ref.rate);
+                std::vector<double> lm, ls;
+                for (std::size_t s = 0; s + block <= n; s += block)
+                {
+                    double p = 0.0, q = 0.0;
+                    for (std::size_t i = s; i < s + block; ++i)
+                    {
+                        p += out[i] * out[i];
+                        q += spiceOut[i] * spiceOut[i];
+                    }
+                    lm.push_back(10.0 * std::log10(std::max(1.0e-30, p / static_cast<double>(block))));
+                    ls.push_back(10.0 * std::log10(std::max(1.0e-30, q / static_cast<double>(block))));
+                }
+                const double loudest = *std::max_element(ls.begin(), ls.end());
+                double sum = 0.0, worst = 0.0;
+                int counted = 0;
+                for (std::size_t j = 0; j < ls.size(); ++j)
+                    if (ls[j] > loudest - 40.0)
+                    {
+                        const double d = lm[j] - ls[j];
+                        sum += d * d;
+                        ++counted;
+                        worst = std::max(worst, std::abs(d));
+                    }
+                const double loudnessRms = std::sqrt(sum / std::max(1, counted));
+                // The filter's own residual (1.5 to 5 % against vcf.cir) shows here as up to 1.5 dB on a harmonic and 0.6 dB
+                // of loudness on the accented square; the same at 192 kHz, so neither the rate nor the wiring.
+                expectLessThan(loudnessRms, 1.0, juce::String(c.file) + ": the loudness over the note");
+                line << " loudness " << juce::String(loudnessRms, 2) << " dB rms (worst " << juce::String(worst, 2) << ");";
+
+                // The harmonics 2 to 12 against the fundamental over four periods, each at its own pitch.
+                const auto hm = harmonicLevels(out, firstModel, firstModel + 4.0 * pm, ref.rate / pm, ref.rate, 12);
+                const auto hs = harmonicLevels(spiceOut, firstSpice, firstSpice + 4.0 * ps, ref.rate / ps, ref.rate, 12);
+                double worstHarmonic = 0.0;
+                for (int h = 1; h < 12; ++h)
+                {
+                    const auto k = static_cast<std::size_t>(h);
+                    if (hs[k] - hs[0] < -30.0) // weaker than 30 dB under the fundamental: not judged
+                        continue;
+                    const double d = std::abs((hm[k] - hm[0]) - (hs[k] - hs[0]));
+                    worstHarmonic = std::max(worstHarmonic, d);
+                    expectLessThan(d, 1.75, juce::String(c.file) + ": harmonic " + juce::String(h + 1));
+                }
+                line << " harmonics 2 to 12 within " << juce::String(worstHarmonic, 2) << " dB | "
+                     << juce::String(100.0 * seconds * ref.rate / static_cast<double>(n), 1) << " % of real time";
                 logMessage(line);
             }
         }
