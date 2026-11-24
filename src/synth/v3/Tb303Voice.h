@@ -215,7 +215,10 @@ namespace coolsynth::synth::v3
         }
 
         /** Filter Tracking (from the CV after the slide, as the Devil Fish takes it) and Filter FM (the output a
-            sample back, through 0.1 uF and 20k into a node some 2.2k from VQ9: a high-pass near 72 Hz). */
+            sample back, through 0.1 uF and 20k into a node some 2.2k from VQ9: a high-pass near 72 Hz). The FM takes
+            the output turned over, as the 303's jack gives it (Din Sync's recordings are inverted against the VCA's
+            own): taken as it was, it fed back against the filter and darkened the note where Whittle's heavy FM
+            (his rw13, rw10) spreads it bright and gritty (CoolSynth's D336). */
         double fishCurrent() noexcept
         {
             // a current into Q10's base closes the filter (measured), so a higher note draws current out of it
@@ -223,7 +226,7 @@ namespace coolsynth::synth::v3
             const double a = std::exp(-1.0 / (voiceRate * 22.2e3 * 0.1e-6));
             fmHigh = a * (fmHigh + out - fmLast);
             fmLast = out;
-            const double fm = Tb303Filter::audioTaper(fishSettings.filterFm) * fmHigh / 22.2e3;
+            const double fm = -Tb303Filter::audioTaper(fishSettings.filterFm) * fmHigh / 22.2e3;
             return tracking + fm;
         }
 

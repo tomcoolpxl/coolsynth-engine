@@ -315,6 +315,32 @@ public:
                        + " V; Filter FM moves the output by up to " + juce::String(differs, 3) + " V");
             expectLessThan(peakMuffled, peakPlain * 0.8, "the Muffler softens the loudest");
             expectGreaterThan(differs, 0.01, "Filter FM changes the sound");
+
+            // Its direction (CoolSynth's D336): with the filter open and resonant, heavy FM spreads the note brighter,
+            // as Whittle's rw13 and rw10 do, judged by the share of its swing that changes from sample to sample.
+            Tb303Voice::Knobs open;
+            open.cutoff = 0.65;
+            open.resonance = 0.85;
+            open.envMod = 0.3;
+            open.decay = 0.8;
+            Tb303Voice::DevilFish held;
+            held.normalDecay = 1.0;
+            const auto brightness = [&](double fmTurn)
+            {
+                held.filterFm = fmTurn;
+                auto v = makeVoice(true, open, held);
+                const auto r = render(*v, 0.6, [](double t) { return Step { 2.0, t > 0.02, false, false }; });
+                double diff = 0.0, level = 0.0;
+                for (std::size_t i = r.out.size() / 2 + 1; i < r.out.size(); ++i)
+                {
+                    diff += (r.out[i] - r.out[i - 1]) * (r.out[i] - r.out[i - 1]);
+                    level += r.out[i] * r.out[i];
+                }
+                return std::sqrt(diff / std::max(level, 1.0e-12));
+            };
+            const double without = brightness(0.0), with = brightness(1.0);
+            logMessage("Filter FM full: brightness " + juce::String(with / without, 2) + " times the note's without");
+            expectGreaterThan(with, without * 1.1, "heavy Filter FM brightens the note");
         }
 
         beginTest("soft_attack");
