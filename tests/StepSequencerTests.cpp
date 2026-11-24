@@ -445,6 +445,31 @@ public:
             expect(hits.size() == 1 && hits[0].note == 38 && hits[0].sample == 0);
         }
 
+        beginTest("with_the_loop_off_a_chain_plays_once_through_then_nothing");
+        {
+            // CoolSynth's D293: the chain 0, 1 plays its two bars, then the sequencer is silent and says it has ended.
+            auto bank = std::make_unique<SequencerBank>();
+            lane(bank->pattern[0], 0, 36, { 0 }, false);
+            lane(bank->pattern[1], 0, 38, { 0 }, false);
+            SequencerSettings s;
+            s.loop = false;
+            auto rig = std::make_unique<Rig>();
+            rig->sequencer.setBank(*bank);
+            rig->sequencer.setSettings(s);
+            const int chain[] { 0, 1 };
+            rig->sequencer.setChain(chain, 2);
+            const auto hits = ons(rig->run(16.0));
+            expectEquals(static_cast<int>(hits.size()), 2);
+            if (hits.size() == 2)
+                expect(hits[0].note == 36 && hits[1].note == 38 && hits[1].sample == 16 * kSixteenth, "once through, in order");
+            expect(! rig->sequencer.endedAt(7.9), "still in its last bar");
+            expect(rig->sequencer.endedAt(8.0), "ended at its end");
+
+            s.loop = true;
+            rig->sequencer.setSettings(s);
+            expect(! rig->sequencer.endedAt(8.0), "with the loop on it never ends");
+        }
+
         beginTest("a_loop_back_to_before_a_switch_plays_the_chain_chosen");
         {
             auto bank = std::make_unique<SequencerBank>();

@@ -67,6 +67,7 @@ namespace coolsynth::synth
         float velocity = 1.0f / 127.0f; // a step's velocity; the 808 kit strikes it at its lowest trigger (D258)
         float accentVelocity = 1.0f;    // an accented step's: the Accent knob's level
         std::uint32_t seed = 0x808u;
+        bool loop = true;               // false: the chain plays once through, then nothing (CoolSynth's D293)
     };
 
     /** Where a beat position falls: for recording a hit onto the nearest step. */
@@ -112,13 +113,17 @@ namespace coolsynth::synth
         /** The beat position of a sixteenth with the swing applied. */
         [[nodiscard]] double swungBeat(std::int64_t sixteenth) const noexcept;
 
+        /** With the loop off, whether the chain has played through by this beat position: from then on nothing plays,
+            and an app with its own transport stops it there. Always false with the loop on. */
+        [[nodiscard]] bool endedAt(double beat) const noexcept;
+
         /** Whether a step plays at a sixteenth, chance included: the same answer every time it is asked. */
         [[nodiscard]] bool passesChance(int lane, std::int64_t sixteenth, float chance) const noexcept;
 
     private:
         struct Segment
         {
-            int pattern = 0;          // -1: the fill
+            int pattern = 0;          // -1: the fill; ended: past the chain's end with the loop off
             bool variationB = false;
             std::int64_t startBar = 0; // where this turn of the pattern began
             std::int64_t runBar = 0;   // where the lanes count from: the chain's start when it is one pattern

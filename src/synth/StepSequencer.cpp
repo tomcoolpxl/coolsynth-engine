@@ -9,6 +9,7 @@ namespace coolsynth::synth
     {
         constexpr int stepsPerBar = 16;
         constexpr double beatsPerStep = 0.25;
+        constexpr int endedPattern = -2; // a segment past the chain's end with the loop off
         constexpr int accentLaneId = SequencerPattern::maxLanes; // the accent lane's own dice
         // A host's position and ours may differ by rounding; past this the transport has jumped.
         constexpr double jumpTolerance = 1.0e-3;
@@ -136,6 +137,9 @@ namespace coolsynth::synth
 
         const int per = barsPerPattern();
         const auto cycle = static_cast<std::int64_t>(length) * per;
+        // The loop off (CoolSynth's D293): once through, then nothing.
+        if (! settings.loop && bar - start >= cycle)
+            return { endedPattern, false, bar, bar };
         const auto m = floorMod(bar - start, cycle);
         const auto within = floorMod(m, per);
         const bool b = settings.variation == SequencerVariation::b
@@ -148,7 +152,15 @@ namespace coolsynth::synth
 
     const SequencerPattern& StepSequencer::patternFor(const Segment& s) const noexcept
     {
+        static const SequencerPattern silence {};
+        if (s.pattern == endedPattern)
+            return silence;
         return s.pattern < 0 ? bankData.fill : bankData.pattern[static_cast<std::size_t>(s.pattern)];
+    }
+
+    bool StepSequencer::endedAt(double beat) const noexcept
+    {
+        return ! settings.loop && std::isfinite(beat) && segmentAt(barOf(beat)).pattern == endedPattern;
     }
 
     void StepSequencer::switchChainAt(std::int64_t bar) noexcept
