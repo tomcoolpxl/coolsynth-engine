@@ -225,7 +225,8 @@ namespace coolsynth::synth::v3
                         if (t.conga() != pendingOther[i])
                             t.setConga(pendingOther[i]);
                         t.trigger(volts);
-                        capture.begin<Tr808Tom>(params.watch, CircuitWatch::lowTom + (k - lowPair), k);
+                        // the toms' sheet shows whichever tom or conga is struck (CoolSynth's D339): one light for the three
+                        capture.begin<Tr808Tom>(params.watch, CircuitWatch::lowTom, k);
                         board.hit(params.watch, CircuitWatch::lowTom + (k - lowPair), t);
                     }
                     running[i] = true;
@@ -292,6 +293,17 @@ namespace coolsynth::synth::v3
                         running[i] = false; // rung down: it rests until its next hit
                     if (((heard >> lights[i]) & 1u) != 0u)
                         sum += y;
+                }
+                // A capture runs its recording's whole length (the toms' sheet takes it whole, CoolSynth's D339): a drum
+                // rung down before it is written on at rest.
+                if (const int c = capture.instrument(); c >= 0 && ! running[static_cast<std::size_t>(c)])
+                {
+                    if (c == bassDrum)
+                        capture.after(bass, sampleRate);
+                    else if (c == rimPair)
+                        capture.after(rim, sampleRate);
+                    else
+                        capture.after(toms[static_cast<std::size_t>(c - 1)], sampleRate);
                 }
 
                 // Two samples late, as every generator.
