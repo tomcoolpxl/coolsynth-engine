@@ -7,15 +7,18 @@
 #include <memory>
 #include <vector>
 
+#include "synth/v3/Tb303Envelope.h"
 #include "synth/v3/Tb303Filter.h"
 #include "synth/v3/Tb303Oscillator.h"
+#include "synth/v3/Tb303Vca.h"
 
 #include <complex>
 
 /*
-    The TB-303 as its circuit (D275, D279) against ngspice renders of the same schematic (tools/tb303/vcf.cir,
-    rendered by tools/tb303/render.py at 192 kHz; the references are in tests/data/tb303): each node's swing about
-    the reference's mean, sample by sample, over 60 ms.
+    The TB-303 as its circuit (D275, D279, D290, D293) against ngspice renders of the same schematics (tools/tb303's
+    vcf.cir, vco.cir and vca.cir, rendered by tools/tb303/render.py; the references are in tests/data/tb303): the
+    filter's nodes sample by sample, the oscillator's pitch, harmonics and aliasing, the envelope's and the VCA's
+    nodes sample by sample.
 */
 namespace
 {
@@ -434,6 +437,114 @@ public:
                        + " dB, square " + juce::String(squareAlias, 1) + " dB re the fundamental");
             expectLessThan(sawAlias, -85.0, "the saw's aliasing at high C");
             expectLessThan(squareAlias, -68.0, "the square's aliasing at high C");
+        }
+
+        beginTest("the_envelope_and_the_vca_match_spice");
+        {
+            // tools/tb303/vca.cir (the envelope with the VCA's control around it): the gate from 10 ms to 72.5 ms, an
+            // accent to 135 ms in the second case, a 440 Hz sine of 0.3 V as the filter's output (the RESONANCE wiper
+            // half of it); rendered at 96 kHz (48 kHz for the long decay), the model at 192 kHz read at the same times.
+            struct AmpCase
+            {
+                const char* file;
+                double decay, accent;
+                bool accented;
+                double amplitude;
+            };
+            const AmpCase cases[] = {
+                { "vca_plain.csv", 0.5, 0.5, false, 0.3 },
+                { "vca_accent.csv", 0.5, 1.0, true, 0.3 },
+                { "vca_longdecay.csv", 1.0, 0.5, false, 0.0 },
+            };
+            using coolsynth::synth::v3::Tb303Envelope;
+            using coolsynth::synth::v3::Tb303Vca;
+            constexpr double rate = 192000.0, gateOn = 0.010, gateOff = 0.0725, accentOff = 0.135;
+            for (const auto& c : cases)
+            {
+                const auto file = referenceFolder().getChildFile(c.file);
+                if (! file.existsAsFile())
+                {
+                    expect(false, juce::String("the SPICE reference is missing: ") + c.file);
+                    continue;
+                }
+                const auto ref = loadReference(file);
+                const int stride = static_cast<int>(std::lround(rate / ref.rate));
+                const std::size_t n = ref.size() * static_cast<std::size_t>(stride);
+                auto env = std::make_unique<Tb303Envelope>();
+                auto vca = std::make_unique<Tb303Vca>();
+                expect(env->fitsItsLimits() && vca->fitsItsLimits(), "the envelope's and the VCA's circuits fit their templates");
+                env->prepare(rate);
+                vca->prepare(rate);
+                expect(env->isWellPosed() && vca->isWellPosed(), "no group of nodes only junctions leave");
+                env->setKnobs(c.decay, c.accent);
+                env->settle();
+                vca->settle(env->pinOne());
+                const char* const nodes[] = { "nenv", "nb31", "ngate", "nout" };
+                std::map<juce::String, std::vector<double>> model;
+                bool converged = true;
+                double envelopeSeconds = 0.0, vcaSeconds = 0.0;
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    const double t = static_cast<double>(i) / rate;
+                    const auto a = std::chrono::steady_clock::now();
+                    env->setAccent(c.accented && t > gateOn && t < accentOff);
+                    env->process(t > gateOn && t < gateOff);
+                    const auto b = std::chrono::steady_clock::now();
+                    const double audio = c.amplitude * std::sin(juce::MathConstants<double>::twoPi * 440.0 * t);
+                    const double out = vca->process(audio, 0.5 * audio, env->pinOne());
+                    const auto e = std::chrono::steady_clock::now();
+                    envelopeSeconds += std::chrono::duration<double>(b - a).count();
+                    vcaSeconds += std::chrono::duration<double>(e - b).count();
+                    converged = converged && env->lastSolveConverged() && vca->lastSolveConverged();
+                    if (i % static_cast<std::size_t>(stride) == 0)
+                    {
+                        model["nenv"].push_back(env->envelope());
+                        model["nb31"].push_back(env->c42());
+                        model["ngate"].push_back(env->gateLine());
+                        model["nout"].push_back(out);
+                    }
+                }
+                expect(converged, juce::String(c.file) + ": every step converged");
+                juce::String line = juce::String(c.file) + ":";
+                auto rmsError = [&](const char* node)
+                {
+                    const auto& x = model[node];
+                    const auto& r = ref.columns.at(node);
+                    const std::size_t len = std::min(x.size(), r.size());
+                    double e = 0.0;
+                    for (std::size_t i = 0; i < len; ++i)
+                        e += (x[i] - r[i]) * (x[i] - r[i]);
+                    return std::sqrt(e / static_cast<double>(std::max<std::size_t>(1, len)));
+                };
+                // The envelope, C42 (the volume's own decay) and GATE in millivolts, rms over the whole render (the
+                // envelope's quarter rate puts it some 60 us late at the attack); the output relative to its swing.
+                for (const auto* node : nodes)
+                {
+                    if (! ref.columns.count(node))
+                        continue;
+                    const double e = rmsError(node);
+                    if (juce::String(node) == "nout")
+                    {
+                        const double share = e / std::max(1.0e-9, swing(ref.columns.at(node)));
+                        line << " output " << juce::String(share * 100.0, 2) << " % of its swing";
+                        expectLessThan(share, 0.02, juce::String(c.file) + ": the VCA's output");
+                    }
+                    else
+                    {
+                        line << " " << node << " " << juce::String(e * 1.0e3, 1) << " mV";
+                        expectLessThan(e, juce::String(node) == "nb31" ? 0.03 : 0.06, juce::String(c.file) + ": " + node);
+                    }
+                }
+                // The long decay's end: the envelope and C42 within a few millivolts.
+                const double endEnv = model["nenv"].back() - ref.columns.at("nenv").back();
+                const double endC42 = model["nb31"].back() - ref.columns.at("nb31").back();
+                expectLessThan(std::abs(endEnv), 0.01, juce::String(c.file) + ": the envelope at the end");
+                expectLessThan(std::abs(endC42), 0.01, juce::String(c.file) + ": C42 at the end");
+                line << " | at the end " << juce::String(endEnv * 1.0e3, 1) << " mV, C42 " << juce::String(endC42 * 1.0e3, 1)
+                     << " mV | envelope " << juce::String(100.0 * envelopeSeconds * rate / static_cast<double>(n), 1)
+                     << " %, VCA " << juce::String(100.0 * vcaSeconds * rate / static_cast<double>(n), 1) << " % of real time";
+                logMessage(line);
+            }
         }
     }
 };

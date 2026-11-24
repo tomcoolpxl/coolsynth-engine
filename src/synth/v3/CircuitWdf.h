@@ -124,6 +124,23 @@ namespace coolsynth::synth::v3::wdf
             nonlinearPort[static_cast<std::size_t>(d.slot[0])] = d.port[0];
         }
 
+        /**
+            An N-JFET with its gate on its source, as one port from drain to source (a current sink: the TB-303's Q39):
+            SPICE's level-1 square law with beta, the pinch-off voltage VTO (negative) and lambda.
+        */
+        void addJfetChannel(int drain, int source, double beta, double pinchOff, double lambda, double portOhms = 1000.0)
+        {
+            const int before = deviceCount;
+            addDiode(drain, source, 1.0e-14, 0.02585, portOhms);
+            if (deviceCount == before)
+                return;
+            Device& d = devices[static_cast<std::size_t>(deviceCount - 1)];
+            d.isChannel = true;
+            d.channelBeta = beta;
+            d.channelOverdrive = -pinchOff;
+            d.channelLambda = lambda;
+        }
+
         /** Two diodes back to back between two nodes (a soft clipper), as one port: Is (e^(v / VT) - e^(-v / VT)). */
         void addDiodePair(int n1, int n2, double saturation, double thermal, double portOhms = 1000.0)
         {
@@ -466,8 +483,9 @@ namespace coolsynth::synth::v3::wdf
 
         struct Device
         {
-            bool isTransistor = false, isPair = false;
+            bool isTransistor = false, isPair = false, isChannel = false;
             double polarity = 1.0; // -1 for a PNP: its junction voltages and currents are the NPN's turned round
+            double channelBeta = 0.0, channelOverdrive = 0.0, channelLambda = 0.0; // addJfetChannel's
             double offset = 0.0;   // a clamp pair's: each diode conducts only past this many volts
             double saturation = 1.0e-14, betaF = 100.0, betaR = 1.0, thermal = 0.02585;
             int port[2] {}, slot[2] {};
@@ -918,6 +936,27 @@ namespace coolsynth::synth::v3::wdf
                     g[s0][s0] = dev.saturation * (up + down) * dev.inverseThermal;
                     continue;
                 }
+                if (dev.isChannel)
+                {
+                    // An N-JFET's channel, its gate on its source (SPICE's level 1): beta (2 Vov v - v^2)(1 + lambda v)
+                    // below Vov = -VTO, beta Vov^2 (1 + lambda v) above; the same turned round for v < 0.
+                    const double x = std::abs(v[s0]), s = v[s0] < 0.0 ? -1.0 : 1.0, o = dev.channelOverdrive;
+                    const double lam = 1.0 + dev.channelLambda * x;
+                    double id = 0.0, gd = 0.0;
+                    if (x < o)
+                    {
+                        id = dev.channelBeta * (2.0 * o * x - x * x);
+                        gd = dev.channelBeta * (2.0 * o - 2.0 * x) * lam + id * dev.channelLambda;
+                    }
+                    else
+                    {
+                        id = dev.channelBeta * o * o;
+                        gd = id * dev.channelLambda;
+                    }
+                    i[s0] = s * id * lam;
+                    g[s0][s0] = gd;
+                    continue;
+                }
                 if (! dev.isTransistor)
                 {
                     const double e = std::exp(std::min(v[s0] * dev.inverseThermal, 80.0));
@@ -1046,6 +1085,8 @@ namespace coolsynth::synth::v3::wdf
         /** A diode's or a diode pair's port voltage limited as a junction's (the pair's in whichever way it conducts). */
         static double limitPort(double vNew, double vOld, const Device& dev) noexcept
         {
+            if (dev.isChannel)
+                return vNew; // a square law, nothing to leap up
             if (! dev.isPair)
                 return limitJunction(vNew, vOld, dev);
             const double o = dev.offset; // a clamp's junctions sit past their offset
@@ -1081,7 +1122,7 @@ namespace coolsynth::synth::v3::wdf
             {
                 const Device& dev = device[d];
                 const double v0 = dev.isPair ? std::abs(v[dev.slot[0]]) - dev.offset : dev.polarity * v[dev.slot[0]];
-                allOff = v0 < 0.4 && (! dev.isTransistor || v0 - dev.polarity * v[dev.slot[1]] < 0.4);
+                allOff = ! dev.isChannel && v0 < 0.4 && (! dev.isTransistor || v0 - dev.polarity * v[dev.slot[1]] < 0.4);
             }
             bool guessed = false;
             if (allOff && ! openCapacitors)
@@ -1196,7 +1237,7 @@ namespace coolsynth::synth::v3::wdf
                         factor(jac);
                         solveWithFactors(residual, delta);
                         ++freshSteps;
-                        freshNext = false;
+                        freshNext = true; // once factored afresh, the sample ends as plain Newton (D293)
                     }
                     else
                     {
@@ -1245,6 +1286,9 @@ namespace coolsynth::synth::v3::wdf
                         largest = std::max(largest, std::abs(delta[r]));
                     if (chord && chordThisSample > 1 && largest > 0.5 * lastLargest)
                         freshNext = true; // the kept factors no longer halve the step
+                    // Far from the answer (a hard edge) kept factors wander: fresh ones from here (D293).
+                    if (chord && largest > 50.0 * chordTolerance)
+                        freshNext = true;
                     lastLargest = largest;
                     if (largest < (chord ? chordTolerance : stepTolerance))
                     {
