@@ -120,7 +120,10 @@ namespace coolsynth::sync
             PeerId session {};
         };
 
-        explicit BeatSync(double initialBpm, Options options = {});
+        // Two constructors, not a default argument: Clang refuses a nested struct's member defaults as a default
+        // argument inside its own class (the Mac, CoolSynth's D370); MSVC takes it.
+        explicit BeatSync(double initialBpm) : BeatSync(initialBpm, Options {}) {}
+        BeatSync(double initialBpm, Options options);
         ~BeatSync();
         BeatSync(const BeatSync&) = delete;
         BeatSync& operator=(const BeatSync&) = delete;
