@@ -24,7 +24,8 @@ target_sources(coolsynth_sync
         "${COOLSYNTH_ENGINE_ROOT}/src/sync/SyncCore.cpp"
         "${COOLSYNTH_ENGINE_ROOT}/src/sync/SyncSockets.cpp"
         "${COOLSYNTH_ENGINE_ROOT}/src/sync/SyncNode.cpp"
-        "${COOLSYNTH_ENGINE_ROOT}/src/sync/SyncClock.cpp")
+        "${COOLSYNTH_ENGINE_ROOT}/src/sync/SyncClock.cpp"
+        "${COOLSYNTH_ENGINE_ROOT}/src/sync/BeatSync.cpp")
 target_include_directories(coolsynth_sync INTERFACE "${COOLSYNTH_ENGINE_ROOT}/src")
 target_compile_features(coolsynth_sync INTERFACE cxx_std_20)
 target_link_libraries(coolsynth_sync INTERFACE juce::juce_core)
@@ -108,6 +109,7 @@ if(BUILD_TESTING AND COOLSYNTH_ENGINE_TESTS)
             "${COOLSYNTH_ENGINE_ROOT}/tests/StepSequencerTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/SyncMathWireTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/SyncCoreTests.cpp"
+            "${COOLSYNTH_ENGINE_ROOT}/tests/SyncAudioTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/SyncNetworkTests.cpp")
     target_include_directories(CoolSynthEngineTests PRIVATE "${COOLSYNTH_ENGINE_ROOT}/tests")
     # The Mac's audio-thread watch rebinds the program's own imports with fishhook (tests/fishhook, BSD licence).
