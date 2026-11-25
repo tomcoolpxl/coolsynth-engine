@@ -18,6 +18,10 @@ namespace
 {
     using namespace coolsynth::sync;
 
+    /** Another program on this computer already in a session: the counts and the joining these tests expect would
+        include it, so they step aside rather than fail. */
+    constexpr const char* skippedForOthers = "skipped: another program speaks the beat sync on this computer";
+
     bool networkTestsSkipped()
     {
         return juce::SystemStats::getEnvironmentVariable("COOLSYNTH_SKIP_NETWORK_TESTS", {}).getIntValue() != 0;
@@ -72,9 +76,15 @@ public:
                 logMessage("skipped: no loopback gateway could open (no multicast on the loopback interface?)");
                 return;
             }
-            const Snapshot first = ha->readSnapshot();
-            expect(first.running && first.peers == 0 && first.timeline.tempo == tempoFromBpm(120.0));
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            const Snapshot first = ha->readSnapshot();
+            if (first.peers != 0)
+            {
+                logMessage(skippedForOthers);
+                a->stop();
+                return;
+            }
+            expect(first.running && first.timeline.tempo == tempoFromBpm(120.0));
 
             b->start();
             const double met = waitFor(3.0, [&]
@@ -189,6 +199,12 @@ public:
             return;
         }
         r.runFor(1.0);
+        if (r.a->status().peers != 0)
+        {
+            logMessage(skippedForOthers);
+            r.a->setEnabled(false);
+            return;
+        }
         const PeerId first = r.a->status().session;
 
         // Discovery and joining.
