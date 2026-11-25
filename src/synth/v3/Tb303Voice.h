@@ -5,6 +5,7 @@
 #include "Tb303Envelope.h"
 #include "Tb303Filter.h"
 #include "Tb303Oscillator.h"
+#include "Tb303Output.h"
 #include "Tb303Vca.h"
 
 /*
@@ -14,12 +15,14 @@
         the envelope into ENV MOD, the ACCENT knob's wiper into the filter's D24 (whose current loads the wiper, handed
         back to the envelope a step late);
         the filter's output and its RESONANCE wiper (loaded by the VCA's C22 and R122) into the VCA;
-        the VCA's control current from the envelope's circuit (pin 1).
+        the VCA's control current from the envelope's circuit (pin 1);
+        the VCA's pin 8 into the output stage (C38, VOLUME and the mixer; CoolSynth's D362), out at the OUTPUT jack.
 
     At 96 kHz (D294): the square's shaper at 768 kHz inside the oscillator, the envelope near 48 kHz. The trimmers as
     page 7 sets them (TM4, TM5) and as fitted to Din Sync's unit (TM3 0.35, C11 0.82 uF; D275). In: the CPU's note as
     the ladder's volts (1 V an octave, the A key unshifted 2.75 V), the gate, the accent and the slide of each step;
-    out: the VCA's output into the mixer, volts.
+    out: the OUTPUT jack's volts into a recorder (Tb303Output::recorderOhms), turned over against the VCA's as the
+    mixer turns it. The VCA's own output (C38 into 100k, as before D362) is vcaOutput().
 */
 namespace coolsynth::synth::v3
 {
@@ -33,7 +36,8 @@ namespace coolsynth::synth::v3
             TB-303, part for part as before. */
         explicit Tb303Voice(bool devilFish = false)
             : osc(std::make_unique<Tb303Oscillator>()), filter(std::make_unique<Tb303Filter>(true, devilFish)),
-              env(std::make_unique<Tb303Envelope>(devilFish)), vca(std::make_unique<Tb303Vca>()), fish(devilFish)
+              env(std::make_unique<Tb303Envelope>(devilFish)), vca(std::make_unique<Tb303Vca>()),
+              stage(std::make_unique<Tb303Output>()), fish(devilFish)
         {
             if (fish)
                 setDevilFish(fishSettings);
@@ -46,6 +50,7 @@ namespace coolsynth::synth::v3
             filter->prepare(sampleRate);
             env->prepare(sampleRate);
             vca->prepare(sampleRate);
+            stage->prepare(sampleRate);
             setKnobs(knobs);
             if (fish)
                 setDevilFish(fishSettings);
@@ -65,6 +70,7 @@ namespace coolsynth::synth::v3
             filter->setNewtonTolerance(volts);
             env->setNewtonTolerance(volts);
             vca->setNewtonTolerance(volts);
+            stage->setNewtonTolerance(volts);
             lighter = on;
         }
         [[nodiscard]] bool isLighter() const noexcept { return lighter; }
@@ -135,11 +141,13 @@ namespace coolsynth::synth::v3
             return resonanceLoop * t * t / (t * t + u * u);
         }
 
-        /** The panel's knobs, each its turn 0..1, and the WAVEFORM switch. */
+        /** The panel's knobs, each its turn 0..1, and the WAVEFORM switch. VOLUME (VR8) is the output stage's pot,
+            ahead of the mixer: full, as Din Sync recorded the unit, loud notes clip on the mixer's lower side. */
         struct Knobs
         {
             double tuning = 0.5, cutoff = 0.5, resonance = 0.5, envMod = 0.5, decay = 0.5, accent = 0.5;
             bool square = false;
+            double volume = 1.0;
         };
 
         /** The trimmers and the part known to vary, as set at the factory or by a player: TM3 the cutoff's range, TM4
@@ -162,8 +170,16 @@ namespace coolsynth::synth::v3
             osc->setTrimmers(trim.tm4, trim.tm5, k.tuning, trim.c11);
             filter->setKnobs(k.cutoff, resonanceTrack(k.resonance), k.envMod, trim.tm3);
             env->setKnobs(k.decay, k.accent);
+            stage->setVolume(k.volume);
             if (fish)
                 setFishEnvelope();
+        }
+
+        /** VOLUME alone (the app's knob moves it as it plays; nothing else is re-analysed). */
+        void setVolume(double turn) noexcept
+        {
+            knobs.volume = turn;
+            stage->setVolume(turn);
         }
 
         /** At rest at this note with the gate low (C33 at 8 V, as the reference starts it). */
@@ -177,6 +193,9 @@ namespace coolsynth::synth::v3
             filter->setFishCurrent(0.0);
             filter->settle(8.35, env->envelope(), env->accentWiper());
             vca->settle(env->pinOne());
+            stage->settle(vca->pinEight());
+            out = stage->output();
+            vcaOut = 0.0;
             fmHigh = fmLast = mufflerLow = 0.0;
             attack = 1.0;
             gateBefore = false;
@@ -207,26 +226,42 @@ namespace coolsynth::synth::v3
             const double saw = osc->process(noteVolts);
             wave = knobs.square ? osc->squareVolts() : saw;
             filter->process(wave, env->envelope(), env->accentWiper());
-            out = vca->process(filter->output(), filter->resonanceWiper(), env->pinOne());
+            vcaOut = vca->process(filter->output(), filter->resonanceWiper(), env->pinOne());
+            double pinEight = vca->pinEight();
             if (fish)
-                out = fishOutput(out, gate, accent);
+            {
+                // The Devil Fish's Soft Attack and Muffler on the VCA's output, ahead of VOLUME: what they take off
+                // the VCA's output (C38 into 100k) comes off pin 8 as well.
+                const double fished = fishOutput(vcaOut, gate, accent);
+                pinEight += fished - vcaOut;
+                vcaOut = fished;
+            }
+            out = stage->process(pinEight);
             return out;
         }
 
+        /** The OUTPUT jack's volts, as process() returned them. */
         [[nodiscard]] double output() const noexcept { return out; }
+        /** The VCA's output (C38 into 100k), the voice's output before the output stage (D362), a Devil Fish's after
+            its Soft Attack and Muffler. */
+        [[nodiscard]] double vcaOutput() const noexcept { return vcaOut; }
         [[nodiscard]] double waveform() const noexcept { return wave; }
         [[nodiscard]] const Tb303Oscillator& oscillator() const noexcept { return *osc; }
         [[nodiscard]] const Tb303Filter& vcf() const noexcept { return *filter; }
         [[nodiscard]] const Tb303Envelope& envelope() const noexcept { return *env; }
         [[nodiscard]] const Tb303Vca& amplifier() const noexcept { return *vca; }
+        [[nodiscard]] const Tb303Output& outputStage() const noexcept { return *stage; }
+        /** The recorder's input on the OUTPUT jack (Tb303Output::recorderOhms unless set). */
+        void setLoad(double ohms) noexcept { stage->setLoad(ohms); }
         [[nodiscard]] bool lastSolveConverged() const noexcept
         {
             return osc->lastSolveConverged() && filter->lastSolveConverged() && env->lastSolveConverged()
-                   && vca->lastSolveConverged();
+                   && vca->lastSolveConverged() && stage->lastSolveConverged();
         }
         [[nodiscard]] bool fitsItsLimits() const noexcept
         {
-            return osc->fitsItsLimits() && filter->fitsItsLimits() && env->fitsItsLimits() && vca->fitsItsLimits();
+            return osc->fitsItsLimits() && filter->fitsItsLimits() && env->fitsItsLimits() && vca->fitsItsLimits()
+                   && stage->fitsItsLimits();
         }
 
     private:
@@ -253,8 +288,8 @@ namespace coolsynth::synth::v3
             // a current into Q10's base closes the filter (measured), so a higher note draws current out of it
             const double tracking = -std::clamp(fishSettings.tracking, 0.0, 1.0) * 1.5 * octaveAmps * (osc->cvVolts() - 2.0);
             const double a = std::exp(-1.0 / (voiceRate * 22.2e3 * 0.1e-6));
-            fmHigh = a * (fmHigh + out - fmLast);
-            fmLast = out;
+            fmHigh = a * (fmHigh + vcaOut - fmLast);
+            fmLast = vcaOut;
             const double fm = -Tb303Filter::audioTaper(fishSettings.filterFm) * fmHigh / 22.2e3;
             return tracking + fm;
         }
@@ -280,9 +315,10 @@ namespace coolsynth::synth::v3
         std::unique_ptr<Tb303Filter> filter;
         std::unique_ptr<Tb303Envelope> env;
         std::unique_ptr<Tb303Vca> vca;
+        std::unique_ptr<Tb303Output> stage;
         Knobs knobs;
         Trimmers trim;
-        double wave = 8.0, out = 0.0;
+        double wave = 8.0, out = 0.0, vcaOut = 0.0;
         bool fish = false, lighter = false;
         DevilFish fishSettings;
         double voiceRate = rate, attackSeconds = 0.3e-3, attack = 1.0, fmHigh = 0.0, fmLast = 0.0, mufflerLow = 0.0;

@@ -1,0 +1,57 @@
+* Roland TB-303 output stage, from the service notes (First Edition, 1982, p. 5, "MIXER"; CoolSynth's D362): the VCA's
+* pin 8 through C38 into VOLUME (VR8, 50k A), its wiper through R155 and C59 into the mixer. Q34 in common base (its
+* base at 5.333 V through R157, held by C52; its emitter the summing node) drives Q33's base through R158 against
+* R154; Q33's collector is the output, R160 to ground and R153 back to the summing node; the local rail through R136
+* and C53. Out through R161 and C56 to the OUTPUT jack (R165) and a recorder's input (rload); the headphone amp's
+* input loads it too (R159, C51 into the LA4140, taken as 30k from its siblings' data sheets). MIX IN (R156, C58) is
+* left open. The reference for CoolSynth 303's Tb303Output.
+*
+* The mixer inverts with a gain of about 2.1 and pulls its output down only through R160, against its load: into a
+* recorder it falls only some 2.1 V under its 4.1 V rest. Din Sync's recordings of a real unit clip at one level on
+* that side in all 25 sets; rload is fitted to it with VOLUME full (D362).
+*
+* Parameters: vol (VOLUME's turn, 0..1), rload, rhp, and the test sine on pin 8 (amp, freq) for this file alone;
+* voice.py leaves the sine out and wires pin 8 from the VCA.
+.param vol=1 rload=16k rhp=30k amp=1 freq=65.406 tend=0.2
+.param tvol={(exp(3.47*vol)-1)/(exp(3.47)-1)}
+.param rvol3={max(50k*(1-tvol), 1)} rvol1={max(50k*tvol, 1)}
+
+.model QEM NPN(IS=39f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2
++ ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p ITF=.4
++ VTF=4 XTF=2 RB=10)
+.model QPM PNP(IS=39f XTI=3 EG=1.11 VAF=18.7 BF=300 NE=1.5 ISE=0 IKF=80m XTB=1.5 BR=4.977 NC=2 ISC=0 IKR=0
++ RC=2.5 CJC=9.728p MJC=.5776 VJC=.75 FC=.5 CJE=8.063p MJE=.3677 VJE=.75 TR=33.42n TF=179.3p ITF=.4 VTF=4 XTF=6
++ RB=10)
+
+VCC vcc 0 11.851
+VR vr 0 5.333
+
+* Pin 8: the BA662's buffer at its 5.3 V rest, a sine on it (this file alone).
+VP8 npin8 0 SIN(5.3 {amp} {freq})
+
+C38 npin8 nvol 1u
+RVOL3 nvol nvolw {rvol3}
+RVOL1 nvolw 0 {rvol1}
+R155 nvolw n155 47k
+C59 n155 nsum 1u
+R157 vr nb34 10k
+C52 nb34 0 10u
+Q34 nc34 nb34 nsum QEM
+R136 vcc nrail 100
+C53 nrail 0 47u
+R154 nrail nc34 100k
+R158 nc34 nb33 10k
+Q33 nmix nb33 nrail QPM
+R160 nmix 0 10k
+R153 nmix nsum 100k
+R161 nmix n161 1k
+C56 n161 njack 1u
+R165 njack 0 100k
+RLOAD njack 0 {rload}
+R159 nmix n159 33k
+C51 n159 nhp 2.2u
+RHP nhp 0 {rhp}
+
+.options method=trap reltol=1e-5 abstol=1e-12 vntol=1e-7
+.tran 2u {tend} 0 2u
+.end

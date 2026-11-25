@@ -30,7 +30,7 @@ namespace
 
     struct Run
     {
-        std::vector<double> out, cv, ladder;
+        std::vector<double> out, vca, cv, ladder; // out the jack; vca the VCA's output, ahead of VOLUME (D362)
         bool converged = true;
     };
 
@@ -49,12 +49,14 @@ namespace
         Run r;
         const auto n = static_cast<std::size_t>(seconds * rate);
         r.out.resize(n);
+        r.vca.resize(n);
         r.cv.resize(n);
         r.ladder.resize(n);
         for (std::size_t i = 0; i < n; ++i)
         {
             const auto s = at(static_cast<double>(i) / rate);
             r.out[i] = v.process(s.note, s.gate, s.accent, s.slide);
+            r.vca[i] = v.vcaOutput();
             r.cv[i] = v.oscillator().cvVolts();
             r.ladder[i] = v.vcf().ladderCurrent();
             r.converged = r.converged && v.lastSolveConverged();
@@ -306,8 +308,9 @@ public:
             auto fm = makeVoice(true, {}, loud);
             const auto q = render(*fm, 0.3, [](double t) { return Step { 2.0, t > 0.02, true, false }; });
             expect(m.converged && q.converged && p.converged);
-            const double peakPlain = *std::max_element(p.out.begin(), p.out.end());
-            const double peakMuffled = *std::max_element(m.out.begin(), m.out.end());
+            // at the VCA's output, where the Muffler sits: at VOLUME full the mixer's own clip flattens the jack's (D362)
+            const double peakPlain = *std::max_element(p.vca.begin(), p.vca.end());
+            const double peakMuffled = *std::max_element(m.vca.begin(), m.vca.end());
             double differs = 0.0;
             for (std::size_t i = 0; i < p.out.size(); ++i)
                 differs = std::max(differs, std::abs(p.out[i] - q.out[i]));

@@ -1,5 +1,6 @@
 """Builds voice.cir, the whole TB-303 voice, from the stage netlists (D275): vco.cir into vcf.cir through the WAVEFORM
-switch, vca.cir (with the envelope) after it, the envelope into ENV MOD and the ACCENT knob's wiper into D24. Each
+switch, vca.cir (with the envelope) after it, the envelope into ENV MOD and the ACCENT knob's wiper into D24, and the
+VCA's pin 8 into out.cir, the output stage (CoolSynth's D362), whose OUTPUT jack is njack. Each
 stage becomes a subcircuit; the stand-ins each stage file keeps for its neighbours (the filter's input saw, its
 envelope and accent sources, its VCA load; the VCA's audio sources; the envelope's ENV MOD load) are left out.
 
@@ -55,9 +56,11 @@ def main():
     vco_p, vco = body("vco.cir")
     vcf_p, vcf = body("vcf.cir")
     vca_p, vca = body("vca.cir")
-    # The filter's stand-ins for its neighbours, and the VCA's.
+    out_p, outs = body("out.cir")
+    # The filter's stand-ins for its neighbours, the VCA's and the output stage's (its test sine on pin 8).
     vcf = drop(vcf, {"BIN", "VENV", "VACC", "R121", "C21"})
     vca = drop(vca, {"VAUD", "BRES", "RLOAD", "VQ9"})
+    outs = drop(outs, {"VP8"})
     # The VCA file holds a subcircuit (the BA662) whose lines body() kept: split it out.
     sub_start = next(i for i, e in enumerate(vca) if e.lower().startswith(".subckt"))
     sub_end = next(i for i, e in enumerate(vca) if e.lower().startswith(".ends"))
@@ -68,14 +71,16 @@ def main():
     ba662 = ba662[:-1] + ba662_models + ba662[-1:]
     ba662_models = []
 
-    out = ["* The whole Roland TB-303 voice (D275), built by voice.py from vco.cir, vcf.cir and vca.cir: do not edit, edit",
+    out = ["* The whole Roland TB-303 voice (D275), built by voice.py from vco.cir, vcf.cir, vca.cir and out.cir: do not edit, edit",
            "* the stages and run voice.py again. The VCO's saw or square (sq) through the WAVEFORM switch into the filter;",
            "* the envelope into ENV MOD; the ACCENT knob's wiper into D24; the filter's output and the RESONANCE wiper into",
-           "* the VCA. The note: cv (volts, 1 V an octave, the A key 2.75 V), the gate from ton to toff, acc (12 on an accent),",
-           "* and every knob as the stages name them (cutoff, res, envmod, decay, accent, tune).",
+           "* the VCA; the VCA's pin 8 into the output stage (out.cir: C38, VOLUME and the mixer, D362), out at the OUTPUT",
+           "* jack, njack, into a recorder (rload). nout stays the VCA's own output, C38 into 100k, as before D362.",
+           "* The note: cv (volts, 1 V an octave, the A key 2.75 V), the gate from ton to toff, acc (12 on an accent),",
+           "* and every knob as the stages name them (cutoff, res, envmod, decay, accent, tune, vol).",
            ".param sq=0"]
     seen = set()
-    for plist in (vco_p, vcf_p, vca_p):
+    for plist in (vco_p, vcf_p, vca_p, out_p):
         for p in plist:
             for name, value in re.findall(r"(\w+)=(\{[^}]*\}|\S+)", p[len(".param"):]):
                 if name in seen or name in ("freq", "amp", "env", "sq"):
@@ -101,17 +106,22 @@ def main():
     out += [".subckt VCO vcc vr nsaw nsq"] + vco + [".ends", ""]
     out += [".subckt VCF vcc vr nin nenv nacc ntp6 nvcf nresw"] + vcf + [".ends", ""]
     vca = [l.replace(" SWI", " SWV") for l in vca]
-    out += [".subckt VCA vcc vr nvcf nresw nenv naccw nout"] + vca + [".ends", ""]
+    out += [".subckt VCA vcc vr nvcf nresw nenv naccw nout nvout"] + vca + [".ends", ""]
     out += ba662 + ba662_models + [""]
+    out += [".subckt OUT vcc vr npin8 njack"] + outs + [".ends", ""]
 
     out += ["XVCO vcc vr nsaw nsq VCO",
             "* The WAVEFORM switch.",
             "BWAVE nwave 0 V = {sq} > 0.5 ? v(nsq) : v(nsaw)",
             "XVCF vcc vr nwave nenv naccw ntp6 nvcf nresw VCF",
-            "XVCA vcc vr nvcf nresw nenv naccw nout VCA",
+            "XVCA vcc vr nvcf nresw nenv naccw nout npin8 VCA",
+            "* Pin 8 into the output stage; the VCA's own C38 into 100k (nout) stays, as in the engine (Tb303Vca).",
+            "XOUT vcc vr npin8 njack OUT",
             "",
             ".ic v(xvco.nc33)=8 v(xvco.nb)=5.9",
-            ".options method=trap reltol=1e-5 abstol=1e-12 vntol=1e-7",
+            "* Gear (ngspice's trap until D362): with the output stage in, trap's step stalls on the VCO's reset at some",
+            "* settings. Against trap's voice_saw reference the VCA's output moves 0.02 dB, the pitch 0.0002 cents.",
+            ".options method=gear reltol=1e-5 abstol=1e-12 vntol=1e-7",
             ".tran 2u {tend} 0 2u",
             ".end"]
     path = os.path.join(HERE, "voice.cir")

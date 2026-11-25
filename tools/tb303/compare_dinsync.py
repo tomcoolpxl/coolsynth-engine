@@ -7,7 +7,8 @@ an unaccented square, an accented square.
 
 Usage: python -I tools/tb303/compare_dinsync.py <folder> SET-A1 13 sim.csv [--t0 0.02] [--periods 8] [--ton 0.01]
 Start the note late (ton 0.4 s): C11 needs some 0.2 s to settle, and a real 303's VCO never stops.
-  sim.csv: render.py's CSV of voice.cir with nout, the note's gate rising at ton (default 10 ms).
+  sim.csv: render.py's CSV of voice.cir with njack (the OUTPUT jack, D362), or any CSV of time and one voltage (its
+  first column after time), the note's gate rising at ton (default 10 ms).
 """
 import argparse
 import csv
@@ -76,7 +77,8 @@ def main():
     with open(a.sim, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     t = [float(r["time"]) for r in rows]
-    v = [float(r["nout"]) for r in rows]
+    column = next(k for k in rows[0] if k != "time")
+    v = [float(r[column]) for r in rows]
     # Resample the simulation evenly at the recording's rate.
     sim_rate = rate
     t_on = a.ton + a.t0

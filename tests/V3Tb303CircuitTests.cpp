@@ -652,7 +652,8 @@ public:
                 {
                     const double t = static_cast<double>(i) / ref.rate;
                     const bool gate = t > gateOn && t < gateOff;
-                    out[i] = voice->process(note, gate, c.accented && gate, false);
+                    voice->process(note, gate, c.accented && gate, false);
+                    out[i] = voice->vcaOutput(); // the VCA's output (nout); the jack after the output stage: V3Tb303OutputTests
                     wave[i] = voice->waveform();
                     converged = converged && voice->lastSolveConverged();
                 }

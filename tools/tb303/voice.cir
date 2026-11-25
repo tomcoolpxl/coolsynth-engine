@@ -1,8 +1,10 @@
-* The whole Roland TB-303 voice (D275), built by voice.py from vco.cir, vcf.cir and vca.cir: do not edit, edit
+* The whole Roland TB-303 voice (D275), built by voice.py from vco.cir, vcf.cir, vca.cir and out.cir: do not edit, edit
 * the stages and run voice.py again. The VCO's saw or square (sq) through the WAVEFORM switch into the filter;
 * the envelope into ENV MOD; the ACCENT knob's wiper into D24; the filter's output and the RESONANCE wiper into
-* the VCA. The note: cv (volts, 1 V an octave, the A key 2.75 V), the gate from ton to toff, acc (12 on an accent),
-* and every knob as the stages name them (cutoff, res, envmod, decay, accent, tune).
+* the VCA; the VCA's pin 8 into the output stage (out.cir: C38, VOLUME and the mixer, D362), out at the OUTPUT
+* jack, njack, into a recorder (rload). nout stays the VCA's own output, C38 into 100k, as before D362.
+* The note: cv (volts, 1 V an octave, the A key 2.75 V), the gate from ton to toff, acc (12 on an accent),
+* and every knob as the stages name them (cutoff, res, envmod, decay, accent, tune, vol).
 .param sq=0
 .param cv=2.75
 .param cv2=2.75
@@ -47,6 +49,12 @@
 .param rdec={max(1Meg*tdec, 1)}
 .param racc1={max(50k*accent, 1)}
 .param racc3={max(50k*(1-accent), 1)}
+.param vol=1
+.param rload=16k
+.param rhp=30k
+.param tvol={(exp(3.47*vol)-1)/(exp(3.47)-1)}
+.param rvol3={max(50k*(1-tvol), 1)}
+.param rvol1={max(50k*tvol, 1)}
 .model QEM NPN(IS=39f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m XTB=1.5 BR=.7371 NC=2
 + ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p ITF=.4
 + VTF=4 XTF=2 RB=10)
@@ -200,7 +208,7 @@ C13 n13 0 1u
 R72 nresbw nb10 100k
 .ends
 
-.subckt VCA vcc vr nvcf nresw nenv naccw nout
+.subckt VCA vcc vr nvcf nresw nenv naccw nout nvout
 VG ng 0 PWL(0 0 {ton} 0 {ton+1u} 5 {toff} 5 {toff+1u} 0)
 R146 ng nb37 22k
 R144 nb37 0 10k
@@ -295,13 +303,42 @@ R21 p9 p8 11k
 .model PL PNP(IS=1f BF=50 VAF=50 CJE=1p CJC=2p TF=20n)
 .ends
 
+.subckt OUT vcc vr npin8 njack
+C38 npin8 nvol 1u
+RVOL3 nvol nvolw {rvol3}
+RVOL1 nvolw 0 {rvol1}
+R155 nvolw n155 47k
+C59 n155 nsum 1u
+R157 vr nb34 10k
+C52 nb34 0 10u
+Q34 nc34 nb34 nsum QEM
+R136 vcc nrail 100
+C53 nrail 0 47u
+R154 nrail nc34 100k
+R158 nc34 nb33 10k
+Q33 nmix nb33 nrail QPM
+R160 nmix 0 10k
+R153 nmix nsum 100k
+R161 nmix n161 1k
+C56 n161 njack 1u
+R165 njack 0 100k
+RLOAD njack 0 {rload}
+R159 nmix n159 33k
+C51 n159 nhp 2.2u
+RHP nhp 0 {rhp}
+.ends
+
 XVCO vcc vr nsaw nsq VCO
 * The WAVEFORM switch.
 BWAVE nwave 0 V = {sq} > 0.5 ? v(nsq) : v(nsaw)
 XVCF vcc vr nwave nenv naccw ntp6 nvcf nresw VCF
-XVCA vcc vr nvcf nresw nenv naccw nout VCA
+XVCA vcc vr nvcf nresw nenv naccw nout npin8 VCA
+* Pin 8 into the output stage; the VCA's own C38 into 100k (nout) stays, as in the engine (Tb303Vca).
+XOUT vcc vr npin8 njack OUT
 
 .ic v(xvco.nc33)=8 v(xvco.nb)=5.9
-.options method=trap reltol=1e-5 abstol=1e-12 vntol=1e-7
+* Gear (ngspice's trap until D362): with the output stage in, trap's step stalls on the VCO's reset at some
+* settings. Against trap's voice_saw reference the VCA's output moves 0.02 dB, the pitch 0.0002 cents.
+.options method=gear reltol=1e-5 abstol=1e-12 vntol=1e-7
 .tran 2u {tend} 0 2u
 .end

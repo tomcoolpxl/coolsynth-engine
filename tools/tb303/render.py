@@ -24,7 +24,8 @@ NGSPICE = next((p for p in _NGSPICE_PLACES if p and os.path.isfile(p)), _NGSPICE
 NODES = {"vco.cir": ["nsaw", "nsq", "nc33", "ncv", "nb", "nbase", "nem", "ne8"],
          "vcf.cir": ["ntp6", "nvcf", "nin", "nb10", "nb11", "nvq9", "n13"],
          "env.cir": ["nenv", "nc62", "ngate", "nc38", "naccw", "ndec"],
-         "vca.cir": ["nout", "nvout", "niabc", "nb31", "ngate", "nenv"]}
+         "vca.cir": ["nout", "nvout", "niabc", "nb31", "ngate", "nenv"],
+         "out.cir": ["njack", "nmix", "nsum"]}
 
 
 def main():
