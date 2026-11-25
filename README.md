@@ -1,7 +1,7 @@
 # CoolSynth engine
 
 The sound engine of CoolSynth and CoolSynth 808: the V3 synthesizer, its circuit models of the TR-808, TR-909 and
-TB-303, the arpeggiator and effects, and the flight recorder they log to. C++20 on JUCE 9.
+TB-303, the arpeggiator and effects, the beat sync, and the flight recorder they log to. C++20 on JUCE 9.
 
 It moved here from CoolSynth's repository on 2026-11-23, with its history (CoolSynth's decision D265).
 
@@ -34,6 +34,8 @@ ctest --test-dir coolsynth-engine/build -C Debug --output-on-failure
 ```
 
 - `COOLSYNTH_TEST_ONLY=<part of a test's name>` runs only the tests whose names contain it.
+- The beat sync's network tests ("Beat sync network ...") open real sockets on the loopback interface;
+  `COOLSYNTH_SKIP_NETWORK_TESTS=1` skips them where multicast is unavailable.
 - The tests that need presets or the plugin, among them the bit-for-bit determinism test over every preset, are in
   CoolSynth's repository: run them there before taking an engine change into a release.
 
@@ -44,6 +46,12 @@ ctest --test-dir coolsynth-engine/build -C Debug --output-on-failure
   audio-thread allocation alarm.
 - `src/synth/v3/Tb303Lid.h`: the TB-303 voice's lid tap, every drawn part's current and node's voltage under the
   names of CoolSynth 303's Under the Lid drawing.
+- `src/sync`: the beat sync (CoolSynth's D361), our own code that keeps one tempo, beat grid and play state with
+  other programs on the local network, wire-compatible with the protocol DAWs speak. Its own target,
+  `coolsynth_sync`, which the engine links; an app uses `BeatSync` on the message thread and `BeatSyncAudio` on the
+  audio thread. The design is CoolSynth's `docs/research/beat-sync-protocol.md`.
+- `tools/beatsync-probe`: a console peer that joins the session and logs every datagram, the timeline and the clock
+  offset (`BeatSyncProbe`, built when the engine is built on its own; `--loopback`, `--seconds N`, `--no-pings`).
 - `tools/tr808`, `tools/kick808`, `tools/kick909`, `tools/tb303`: the ngspice netlists the circuit models are checked against, and
   their render scripts; `tests/data`: the renders the tests compare with.
 - The design and research notes the code cites (`docs/design/DESIGN_V3.md`, `docs/research/...`) stay in

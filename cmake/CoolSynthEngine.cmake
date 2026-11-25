@@ -33,6 +33,19 @@ if(WIN32)
     target_link_libraries(coolsynth_sync INTERFACE ws2_32 iphlpapi winmm) # Winsock, the adapter list, timeBeginPeriod
 endif()
 
+# The beat sync's console peer, for checks against other programs that speak the protocol. Built when the engine is
+# built on its own.
+option(COOLSYNTH_BEATSYNC_PROBE "Build the beat sync's console peer, beatsync-probe" ${PROJECT_IS_TOP_LEVEL})
+if(COOLSYNTH_BEATSYNC_PROBE)
+    juce_add_console_app(BeatSyncProbe)
+    target_sources(BeatSyncProbe PRIVATE "${COOLSYNTH_ENGINE_ROOT}/tools/beatsync-probe/main.cpp")
+    target_link_libraries(BeatSyncProbe
+        PRIVATE
+            coolsynth_sync
+            coolsynth_config_flags
+            juce::juce_recommended_warning_flags)
+endif()
+
 add_library(coolsynth_engine INTERFACE)
 
 target_sources(coolsynth_engine
