@@ -14,6 +14,17 @@ juce_add_binary_data(CoolSynthInstrumentData
     NAMESPACE InstrumentData
     SOURCES "${COOLSYNTH_ENGINE_ROOT}/resources/instruments/catalogue.txt")
 
+# The beat sync (CoolSynth's D361): a tempo, beat grid and play state shared with other programs on the network,
+# DAWs among them, by the protocol they speak. Its own INTERFACE target, so a small tool (the console peer) can build
+# it without the synth; the engine brings it to every app.
+add_library(coolsynth_sync INTERFACE)
+target_sources(coolsynth_sync
+    INTERFACE
+        "${COOLSYNTH_ENGINE_ROOT}/src/sync/SyncWire.cpp")
+target_include_directories(coolsynth_sync INTERFACE "${COOLSYNTH_ENGINE_ROOT}/src")
+target_compile_features(coolsynth_sync INTERFACE cxx_std_20)
+target_link_libraries(coolsynth_sync INTERFACE juce::juce_core)
+
 add_library(coolsynth_engine INTERFACE)
 
 target_sources(coolsynth_engine
@@ -48,7 +59,8 @@ target_link_libraries(coolsynth_engine
         juce::juce_audio_basics
         juce::juce_audio_formats
         juce::juce_dsp
-        CoolSynthInstrumentData)
+        CoolSynthInstrumentData
+        coolsynth_sync)
 
 # The engine's own tests: the ones that need nothing but the engine. A program of their own, so a change to the
 # engine is checked without the app; the operator new that counts audio-thread allocations comes with it.
@@ -86,7 +98,8 @@ if(BUILD_TESTING AND COOLSYNTH_ENGINE_TESTS)
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tr808Tests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3Tr909Tests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3VoiceTests.cpp"
-            "${COOLSYNTH_ENGINE_ROOT}/tests/StepSequencerTests.cpp")
+            "${COOLSYNTH_ENGINE_ROOT}/tests/StepSequencerTests.cpp"
+            "${COOLSYNTH_ENGINE_ROOT}/tests/SyncMathWireTests.cpp")
     target_include_directories(CoolSynthEngineTests PRIVATE "${COOLSYNTH_ENGINE_ROOT}/tests")
     # The Mac's audio-thread watch rebinds the program's own imports with fishhook (tests/fishhook, BSD licence).
     if(APPLE)
