@@ -267,6 +267,35 @@ public:
             expectEquals(first, -1, "the first sample that differs");
         }
 
+        beginTest("struck_while_it_rings_each_hit_is_the_tightly_solved_drums");
+        {
+            // CoolSynth's D356: at the solver's default 100 nV the hits after the first, struck while the last still
+            // rang, came out 12 ms early and up to 4 dB off. At the 808's tolerance a drum struck on every step at
+            // 120 BPM is the drum solved to 1 pV.
+            auto drum = std::make_unique<Tr808BassDrum>(), tight = std::make_unique<Tr808BassDrum>();
+            tight->setNewtonTolerance(1.0e-12);
+            for (auto* d : { drum.get(), tight.get() })
+            {
+                d->prepare(48000.0);
+                d->setDecay(0.6);
+            }
+            double error = 0.0, signal = 0.0;
+            for (int i = 0; i < 48000; ++i)
+            {
+                if (i % 6000 == 0)
+                {
+                    drum->trigger(9.0);
+                    tight->trigger(9.0);
+                }
+                const double a = drum->process(), b = tight->process();
+                error += (a - b) * (a - b);
+                signal += b * b;
+            }
+            const double db = 10.0 * std::log10(std::max(error, 1.0e-30) / signal);
+            logMessage("against 1 pV: " + juce::String(db, 1) + " dB");
+            expectLessThan(db, -120.0, "the drum against itself solved to 1 pV");
+        }
+
         beginTest("newton_stays_short_under_the_hardest_settings");
         {
             // A wide trigger (Click full), the strongest accent, the longest decay: the solver's iterations a sample.

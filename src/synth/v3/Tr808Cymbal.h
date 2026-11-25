@@ -64,6 +64,7 @@ namespace coolsynth::synth::v3
         {
             full.setNewtonLimit(40);
             tail.setNewtonLimit(40);
+            solveTo808Tolerance(full, tail, top, middle, low, mix); // D356
             buildEnvelope(tail, false);
             buildEnvelope(full, true);
             buildTop();

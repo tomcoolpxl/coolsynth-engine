@@ -66,6 +66,7 @@ namespace coolsynth::synth::v3
             openTail.setNewtonLimit(40);
             closedFull.setNewtonLimit(40);
             closedTail.setNewtonLimit(40);
+            solveTo808Tolerance(openFull, openTail, closedFull, closedTail, openVca, closedVca, openOutput, closedOutput); // D356
             buildOpenEnvelope(openTail, false);
             buildOpenEnvelope(openFull, true);
             buildClosedEnvelope(closedTail, false);

@@ -94,6 +94,7 @@ namespace coolsynth::synth::v3
             pair.setNewtonLimit(40);
             maEnvelope.setNewtonLimit(40);
             maNoise.setNewtonLimit(40);
+            solveTo808Tolerance(front, tail, bandPass, reverb, bursts, pair, maEnvelope, maNoise, mixer); // D356
             buildFront();
             buildTail();
             buildBandPass();

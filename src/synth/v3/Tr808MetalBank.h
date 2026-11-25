@@ -48,7 +48,11 @@ namespace coolsynth::synth::v3
             with C5 18n, 359 to 1150 Hz): the two together, in semitones from 554 and 825 Hz, within both. */
         static constexpr double cowbellLowestSemitones = -12.0, cowbellHighestSemitones = 2.0;
 
-        Tr808MetalBank() { buildBands(); }
+        Tr808MetalBank()
+        {
+            solveTo808Tolerance(bands); // D356
+            buildBands();
+        }
 
         void prepare(double rate) noexcept
         {
@@ -319,6 +323,7 @@ namespace coolsynth::synth::v3
             circuit.addOpAmp(3, 4, 5, 6, Tr808MetalBank::opAmpBandwidth, 14.0);                                // IC2a
             out = circuit.addProbe(5);
             circuit.setNewtonLimit(60);
+            solveTo808Tolerance(circuit); // D356
         }
 
         /** IC2a's output at a TRIG of this many volts (solved from the same start each time, so it is the same bits). */

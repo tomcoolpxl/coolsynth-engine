@@ -59,6 +59,7 @@ namespace coolsynth::synth::v3
         {
             front.setNewtonLimit(40); // the trigger's edges switch three transistors at once
             snappy.setNewtonLimit(40);
+            solveTo808Tolerance(front, tail, lower, upper, snappy, mixer); // D356
             buildFront();
             buildTail();
             buildShell(lower, c58, c59, r197, r196, lowerParts);

@@ -59,6 +59,7 @@ namespace coolsynth::synth::v3
         {
             front.setNewtonLimit(40); // the trigger's edges switch two transistors and three junctions at once
             vca.setNewtonLimit(40);
+            solveTo808Tolerance(front, low, high, vca, mixer); // D356
             buildFront();
             buildLow();
             buildHigh();

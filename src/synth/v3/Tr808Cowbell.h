@@ -50,6 +50,7 @@ namespace coolsynth::synth::v3
         {
             front.setNewtonLimit(40);
             vca.setNewtonLimit(40);
+            solveTo808Tolerance(front, vca, output); // D356
             buildFront();
             buildVca();
             buildOutput();

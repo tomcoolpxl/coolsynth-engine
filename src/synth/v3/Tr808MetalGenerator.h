@@ -208,7 +208,7 @@ namespace coolsynth::synth::v3
             if (const bool lighter = params.watch != nullptr && params.watch->lighter(); lighter != lighterNow)
             {
                 lighterNow = lighter;
-                const double tolerance = lighter ? 1.0e-5 : 1.0e-7;
+                const double tolerance = lighter ? 1.0e-5 : tr808Tolerance; // Best: D356
                 bell.setNewtonTolerance(tolerance);
                 cymbalCircuit.setNewtonTolerance(tolerance);
                 hats.setNewtonTolerance(tolerance);

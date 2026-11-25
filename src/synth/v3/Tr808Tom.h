@@ -80,6 +80,7 @@ namespace coolsynth::synth::v3
         {
             front.setNewtonLimit(40); // the trigger's edges switch two transistors and two junctions at once
             gate.setNewtonLimit(40);
+            solveTo808Tolerance(front, gate, resonator, mixer); // D356
             buildFront();
             buildGate();
             buildResonator();
