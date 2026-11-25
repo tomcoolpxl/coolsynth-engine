@@ -27,9 +27,16 @@
     some 2.2 us at 192 kHz (45 % of a core, optimised Debug), within some 3 ppm of the exact solve.
 
     Transistors: the 2SC945 and 2SA733 as vcf.cir's stand-ins (Fairchild's 2N3904 and 2N3906 with IS from the parts'
-    typical VBE), here as Ebers-Moll with their forward Early voltages (VAF 74 V, 18.7 V); the duals (2SC1583, 2SC2291) as matched NPNs of hFE 500, VAF 100 V. The rungs' diode-wired
-    2SC945s as diodes of IS (1 + 1 / hFE). The audio-taper pots as 15 % at half turn. ngspice's 27 C thermal voltage.
-    The 12 V rail at 11.85 V (IC16, D275). Volts in, volts out.
+    typical VBE), here as Ebers-Moll with their forward Early voltages (VAF 74 V, 18.7 V) and the 2N3904's base
+    recombination (Gummel-Poon's ISE 6.734 fA, NE 1.259: at the uA they carry here it doubles a base current; the
+    2N3906 has none); the duals (2SC1583, 2SC2291) as matched NPNs of hFE 500, VAF 100 V, Q21 with its collector
+    junctions' capacitance (CJC 2.5 pF at its bias, some 1.54 pF, which the pair's gain of some 225 multiplies). The
+    rungs' diode-wired 2SC945s as diodes of IS (1 + 1 / hFE) with the same recombination. Q20, the tail, solved at
+    rest as the same 2N3904 from the bias divider the loop leaves (Q21's base currents on it) and its own base
+    current; the loop's R112 and R109 as their Thevenin equivalent from nbias, Q20's base current drawn through them.
+    Without the recombination and the capacitance the filter sat 1.7 to 4.8 % off vcf.cir on the test's cases, 10 %
+    at cutoff 0.9 with full resonance (CoolSynth's D360). The audio-taper pots as 15 % at half turn. ngspice's 27 C
+    thermal voltage. The 12 V rail at 11.85 V (IC16, D275). Volts in, volts out.
 */
 namespace coolsynth::synth::v3
 {
@@ -39,6 +46,10 @@ namespace coolsynth::synth::v3
     public:
         static constexpr double thermal = 0.025865;  // ngspice's at 27 C
         static constexpr double npnSaturation = 39.0e-15, npnBetaF = 416.4, npnBetaR = 0.7371, npnEarly = 74.03;
+        static constexpr double npnRecombination = 6.734e-15, npnRecombinationEmission = 1.259; // QEM's ISE and NE
+        /** Q21's collector junctions at rest (ngspice's cmu at vcf.cir's operating point: CJC 2.5 pF, VJC 0.75 V and
+            MJC 0.33 as ngspice's defaults, Vbc -2.496 V left, -2.456 V right), as fixed capacitors from base to collector. */
+        static constexpr double q21LeftCjc = 1.5415e-12, q21RightCjc = 1.5478e-12;
         static constexpr double pnpSaturation = 39.0e-15, pnpBetaF = 300.0, pnpBetaR = 4.977, pnpEarly = 18.7;
         static constexpr double dualSaturation = 10.0e-15, dualBetaF = 500.0, dualBetaR = 4.0, dualEarly = 100.0;
         static constexpr double diodeSaturation = 2.52e-9, diodeEmission = 1.752; // D24, the 1S2473 as a 1N4148
@@ -68,6 +79,9 @@ namespace coolsynth::synth::v3
                 loop.addCapacitor(27, 34, 0.01e-6); // the VCA's C22
                 loop.addResistor(34, 2, 100.0e3);   // and R122, into pin 3
             }
+            // Q21's collector-base capacitance, last so that every port before keeps its number (Tb303Lid.h).
+            loop.addCapacitor(20, 22, q21LeftCjc);
+            loop.addCapacitor(21, 23, q21RightCjc);
             if (devilFish)
                 sFish = converter.addSource(8, 0, sourceOhms);
             fish = devilFish;
@@ -153,10 +167,13 @@ namespace coolsynth::synth::v3
         void settle(double input, double envelope, double accent) noexcept
         {
             setInputs(input, envelope, accent);
-            tailAmps = tailCurrent();
-            double ne12 = 4.8;
+            // Q20 from the bias as the loop leaves it (nbias under Q21's base currents and Q20's own, its collector at
+            // Q21's emitters), each pass from the one before: the tail moves the loop's nodes by mV, they move it by ppm.
+            double ne12 = 4.8, nbias = reference * (20.0e3 / 30.0e3), ne21 = lastNe21;
             for (int pass = 0; pass < 6; ++pass)
             {
+                solveTail(nbias, ne21);
+                loop.setSource(sBias, -10.0e3 * tailBaseAmps);
                 converter.setInput(convNe12, ne12);
                 converter.settle();
                 collectorAmps = (ne12 - converter.probe(pNc11)) / 2.2e3;
@@ -164,6 +181,10 @@ namespace coolsynth::synth::v3
                 loop.setSource(sCollector, ne12 - collectorAmps * sourceOhms);
                 loop.settle();
                 ne12 = loop.probe(pNe12);
+                double volts[35];
+                loop.nodeVoltages(volts);
+                nbias = volts[19];
+                ne21 = volts[24];
             }
             lastNe12 = ne12;
             lastNe21 = loop.probe(pNe21);
@@ -223,19 +244,43 @@ namespace coolsynth::synth::v3
             loop.setInput(loopIn, input);
         }
 
-        /** Q20's collector current: its base from R116, R112, R109 (5.333 V into 10k, 10k, 10k), R108 2.2k. */
-        static double tailCurrent() noexcept
+        /**
+            Q20 at rest (tailAmps its collector current, tailBaseAmps its base's), as the loop's other 2N3904s: Ebers-Moll
+            with the Early effect and the base recombination. Its base from nbias through R112 (10k), R109 (10k) to
+            ground, less its base current; R108 (2.2k) under its emitter; its collector at Q21's emitters (ne21).
+        */
+        void solveTail(double nbias, double ne21) noexcept
         {
-            const double thevenin = reference * (10.0e3 / 30.0e3), theveninOhms = 20.0e3 * 10.0e3 / 30.0e3;
-            double ic = 0.5e-3;
-            for (int i = 0; i < 50; ++i)
+            double vbe = 0.66, vb = 0.5 * nbias;
+            double ic = 0.0, ib = 0.0;
+            for (int outer = 0; outer < 40; ++outer)
             {
-                const double vbe = thermal * std::log(ic / npnSaturation);
-                const double ie = ic * (1.0 + 1.0 / npnBetaF);
-                const double vb = thevenin - (ie / (npnBetaF + 1.0)) * theveninOhms;
-                ic = std::max(1.0e-9, (vb - vbe) / 2.2e3 / (1.0 + 1.0 / npnBetaF));
+                // The emitter's KCL in vbe at this base voltage: (vb - vbe) / R108 = ic + ib, falling in vbe.
+                for (int it = 0; it < 60; ++it)
+                {
+                    const double ef = std::exp(vbe / thermal), er = std::exp((vb - ne21) / thermal);
+                    const double el = std::exp(vbe / (thermal * npnRecombinationEmission));
+                    const double iF = npnSaturation * (ef - 1.0), iR = npnSaturation * (er - 1.0);
+                    const double k = 1.0 - (vb - ne21) / npnEarly;
+                    ic = (iF - iR) * k - iR / npnBetaR;
+                    ib = iF / npnBetaF + iR / npnBetaR + npnRecombination * (el - 1.0);
+                    const double f = (vb - vbe) / 2.2e3 - ic - ib;
+                    const double gF = npnSaturation * ef / thermal;
+                    const double df = -1.0 / 2.2e3 - gF * k - gF / npnBetaF
+                                      - npnRecombination * el / (thermal * npnRecombinationEmission);
+                    const double step = std::clamp(f / df, -0.05, 0.05);
+                    vbe -= step;
+                    if (std::abs(step) < 1.0e-15)
+                        break;
+                }
+                const double next = 0.5 * (nbias - 10.0e3 * ib); // (nbias - vb) / R112 = vb / R109 + ib
+                const bool done = std::abs(next - vb) < 1.0e-14;
+                vb = next;
+                if (done)
+                    break;
             }
-            return ic;
+            tailAmps = std::max(1.0e-9, ic);
+            tailBaseAmps = ib;
         }
 
         // Converter: 1 the 12 V rail, 2 5.333 V, 3 the envelope, 4 the ACCENT wiper, 5 Q12's emitters (all inputs);
@@ -253,7 +298,8 @@ namespace coolsynth::synth::v3
             converter.addResistor(6, 0, 10.0e3);                                                   // R64
             converter.addPnpTransistor(0, 6, 7, pnpSaturation, pnpBetaF, pnpBetaR, thermal, pnpEarly);      // Q9
             converter.addPnpTransistor(0, 8, 9, pnpSaturation, pnpBetaF, pnpBetaR, thermal, pnpEarly);      // Q10
-            converter.addTransistor(10, 9, 7, npnSaturation, npnBetaF, npnBetaR, thermal, npnEarly);        // Q11
+            converter.addTransistor(10, 9, 7, npnSaturation, npnBetaF, npnBetaR, thermal, npnEarly, npnRecombination,
+                                    thermal * npnRecombinationEmission);                                          // Q11
             converter.addResistor(10, 5, 2.2e3);                                                   // R69
             rCut3 = converter.addResistor(1, 11, 25.0e3);                                          // CUTOFF above its wiper
             rCut1 = converter.addResistor(11, 12, 25.0e3);                                         // and below
@@ -300,13 +346,13 @@ namespace coolsynth::synth::v3
             loop.addResistor(8, 7, 2.2e3);                                                         // R98
             loop.addTransistor(9, 6, 18, dualSaturation, dualBetaF, dualBetaR, thermal, dualEarly);          // Q12, left
             loop.addTransistor(13, 8, 18, dualSaturation, dualBetaF, dualBetaR, thermal, dualEarly);         // Q12, right
-            const double rung = npnSaturation * (1.0 + 1.0 / npnBetaF);
-            loop.addDiode(10, 9, rung, thermal);                                                   // Q13
-            loop.addDiode(11, 10, rung, thermal);                                                  // Q14
-            loop.addDiode(12, 11, rung, thermal);                                                  // Q16
-            loop.addDiode(14, 13, rung, thermal);                                                  // Q15
-            loop.addDiode(15, 14, rung, thermal);                                                  // Q17
-            loop.addDiode(16, 15, rung, thermal);                                                  // Q23
+            const double rung = npnSaturation * (1.0 + 1.0 / npnBetaF), recombinationThermal = thermal * npnRecombinationEmission;
+            loop.addDiode(10, 9, rung, thermal, 1000.0, npnRecombination, recombinationThermal);   // Q13
+            loop.addDiode(11, 10, rung, thermal, 1000.0, npnRecombination, recombinationThermal);  // Q14
+            loop.addDiode(12, 11, rung, thermal, 1000.0, npnRecombination, recombinationThermal);  // Q16
+            loop.addDiode(14, 13, rung, thermal, 1000.0, npnRecombination, recombinationThermal);  // Q15
+            loop.addDiode(15, 14, rung, thermal, 1000.0, npnRecombination, recombinationThermal);  // Q17
+            loop.addDiode(16, 15, rung, thermal, 1000.0, npnRecombination, recombinationThermal);  // Q23
             // A leak across each rung (as SPICE's GMIN): with the capacitors open at rest, a rung's middle node would
             // hang between two junctions alone and the solve could not place it.
             for (const auto& [a, b] : { std::pair { 10, 9 }, { 11, 10 }, { 12, 11 }, { 14, 13 }, { 15, 14 }, { 16, 15 } })
@@ -321,7 +367,7 @@ namespace coolsynth::synth::v3
             loop.addCapacitor(17, 0, 10.0e-6);                                                     // C30
             loop.addResistor(2, 19, 10.0e3);                                                       // R116
             loop.addCapacitor(19, 0, 1.0e-6);                                                      // C29
-            loop.addResistor(19, 0, 20.0e3);                                                       // R112 and R109, Q20's bias
+            sBias = loop.addSource(19, 0, 20.0e3); // R112 and R109, Q20's bias: their Thevenin, -10k times its base current
             loop.addCapacitor(16, 20, 0.1e-6);                                                     // C27
             loop.addCapacitor(12, 21, 0.1e-6);                                                     // C25
             loop.addResistor(20, 19, 100.0e3);                                                     // R113
@@ -331,7 +377,8 @@ namespace coolsynth::synth::v3
             loop.addResistor(4, 22, 22.0e3);                                                       // R111 (22k, D275)
             loop.addResistor(4, 23, 22.0e3);                                                       // R110 (22k, D275)
             sTail = loop.addSource(24, 0, sourceOhms);                                             // Q20, a fixed current
-            loop.addTransistor(4, 23, 25, npnSaturation, npnBetaF, npnBetaR, thermal, npnEarly);            // Q19
+            loop.addTransistor(4, 23, 25, npnSaturation, npnBetaF, npnBetaR, thermal, npnEarly, npnRecombination,
+                               recombinationThermal);                                                       // Q19
             loop.addResistor(25, 0, 10.0e3);                                                       // R96
             loop.addCapacitor(25, 26, 1.0e-6);                                                     // C14
             rResA3 = loop.addResistor(26, 27, 25.0e3);                                             // RESONANCE above its wiper
@@ -343,7 +390,8 @@ namespace coolsynth::synth::v3
             loop.addResistor(2, 31, 100.0e3);                                                      // R66
             loop.addCapacitor(31, 0, 1.0e-6);                                                      // C22
             loop.addResistor(31, 30, 100.0e3);                                                     // R99
-            loop.addTransistor(1, 30, 32, npnSaturation, npnBetaF, npnBetaR, thermal, npnEarly);            // Q18
+            loop.addTransistor(1, 30, 32, npnSaturation, npnBetaF, npnBetaR, thermal, npnEarly, npnRecombination,
+                               recombinationThermal);                                                       // Q18
             loop.addResistor(32, 0, 10.0e3);                                                       // R94
             loop.addCapacitor(32, 33, 1.0e-6);                                                     // C23
             rR97 = loop.addResistor(33, 8, 10.0e3);                                                // R97
@@ -358,9 +406,10 @@ namespace coolsynth::synth::v3
         }
 
         wdf::Circuit<19, 27, 5, 0, 7, 7, true> converter; // 26 ports, one more in a Devil Fish
-        wdf::Circuit<34, 69, 3, 0, 22, 7, true> loop; // 67 ports counted from buildLoop, 2 more loaded by the VCA
+        wdf::Circuit<34, 71, 3, 0, 22, 7, true> loop; // 67 ports counted from buildLoop, 2 more loaded by the VCA, Q21's 2
 
-        double tailAmps = 0.5e-3, collectorAmps = 0.0, lastNe12 = 4.8, lastNe21 = 2.9;
+        double tailAmps = 0.5e-3, tailBaseAmps = 0.0, collectorAmps = 0.0, lastNe12 = 4.8, lastNe21 = 2.9;
+        int sBias = 0;
         bool fish = false;
         double fishAmps = 0.0, r46Ohms = 47.0e3, tm3Turn = 0.35, tm3Share = 1.0;
         int sFish = 0, rR47 = 0, rR73 = 0, rR61 = 0, rR63 = 0, rR46 = 0, cC13 = 0, rR62 = 0, cC21 = 0, rR97 = 0;

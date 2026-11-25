@@ -369,11 +369,15 @@ public:
                     const auto [err, offset] = swingError(model[node], ref.columns.at(node));
                     line << " " << node << " " << juce::String(err, 4) << " (" << juce::String(offset * 1e3, 2) << " mV)";
                     // A node that holds still in the reference (the converter's with the envelope steady) is judged by
-                    // its level; TP6's level aside (C14 takes it off; 31 mV low here, its far side within 2 mV).
+                    // its level. Since the filter took the 2N3904's base recombination, Q21's collector capacitance and
+                    // Q20's tail from the loaded bias (CoolSynth's D360) every swing is within 0.4 to 1.1 % (1.7 to 4.8 %
+                    // before) and TP6's level within 1.2 to 3.2 mV (31 to 33 mV low before): 2 % and 5 mV.
                     if (swing(ref.columns.at(node)) < 1.0e-3)
                         expectLessThan(std::abs(offset), 2.0e-3, juce::String(c.file) + " " + node + ", its level");
                     else
-                        expectLessThan(err, 0.05, juce::String(c.file) + " " + node);
+                        expectLessThan(err, 0.02, juce::String(c.file) + " " + node);
+                    if (juce::String(node) == "ntp6")
+                        expectLessThan(std::abs(offset), 5.0e-3, juce::String(c.file) + " TP6's level");
                 }
                 line << " | analyses " << (coolsynth::synth::v3::wdf::analysesOnThisThread - analysesBefore) << " | Newton most " << worstNewton << ", mean " << juce::String(static_cast<double>(totalNewton) / static_cast<double>(n), 2)
                      << " | " << juce::String(1.0e9 * seconds / static_cast<double>(n), 0) << " ns a sample at "
@@ -706,8 +710,9 @@ public:
                         worst = std::max(worst, std::abs(d));
                     }
                 const double loudnessRms = std::sqrt(sum / std::max(1, counted));
-                // The filter's own residual (1.5 to 5 % against vcf.cir) shows here as up to 1.5 dB on a harmonic and 0.6 dB
-                // of loudness on the accented square; the same at 192 kHz, so neither the rate nor the wiring.
+                // The voice's residual, 0.35 to 0.7 dB rms of loudness (the accented square's the most), the same before
+                // the filter took its base recombination and Q21's capacitance (CoolSynth's D360): not the filter's,
+                // which now keeps within 0.4 to 1.1 % of vcf.cir; the same at 192 kHz, so neither the rate nor the wiring.
                 expectLessThan(loudnessRms, 1.0, juce::String(c.file) + ": the loudness over the note");
                 line << " loudness " << juce::String(loudnessRms, 2) << " dB rms (worst " << juce::String(worst, 2) << ");";
 
@@ -722,7 +727,8 @@ public:
                         continue;
                     const double d = std::abs((hm[k] - hm[0]) - (hs[k] - hs[0]));
                     worstHarmonic = std::max(worstHarmonic, d);
-                    expectLessThan(d, 1.75, juce::String(c.file) + ": harmonic " + juce::String(h + 1));
+                    // Within 0.27, 1.03 and 0.51 dB since D360 (0.55, 1.18, 1.18 before): 1.3 dB.
+                    expectLessThan(d, 1.3, juce::String(c.file) + ": harmonic " + juce::String(h + 1));
                 }
                 line << " harmonics 2 to 12 within " << juce::String(worstHarmonic, 2) << " dB | "
                      << juce::String(100.0 * seconds * ref.rate / static_cast<double>(n), 1) << " % of real time";

@@ -260,13 +260,12 @@ public:
             };
             auto allowance = [](const std::string& n) -> Allowance
             {
-                // The 2SC945s (QEM) without Gummel-Poon's base recombination (ISE 6.7 fA, NE 1.26; only Q41, Q40,
-                // Q32 carry it): their base currents read a third to two thirds low at uA, and so do R66 and R99,
-                // which carry Q18's; Q18's emitter a hundred mV high with it.
-                static const std::set<std::string> baseCurrents = {
-                    "xvcf.q11.ib", "xvcf.q13.ib", "xvcf.q14.ib", "xvcf.q15.ib", "xvcf.q16.ib", "xvcf.q17.ib",
-                    "xvcf.q23.ib", "xvcf.q18.ib", "xvcf.q19.ib", "xvcf.q20.ib", "xvcf.r66.i", "xvcf.r99.i" };
-                static const std::set<std::string> q18 = { "xvcf.q18.ic", "xvcf.r94.i", "xvcf.ne18", "xvcf.nb18", "xvcf.n15" };
+                // The filter's 2SC945s carry Gummel-Poon's base recombination since CoolSynth's D360 (their base
+                // currents, R66's and R99's, Q18's emitter within the default allowances, at rest within 1.3 %). The
+                // accented note's ring on C14's side at 150 ms, its amplitude under ngspice's (vcf.cir's accent case
+                // within 1.1 % of its swing): 24.4 % there before D360, 26.8 % after, the moment at the ring's phase.
+                static const std::set<std::string> accentRing = {
+                    "nvcf", "nresw", "xvcf.rres1.i", "xvcf.rres3.i", "xvcf.c14.i", "xvcf.c15.i", "xvcf.r67.i", "xvcf.c22.i" };
                 // Nodes that only nanoamps hold at rest, where the engine's 1 GOhm leaks (SPICE's GMIN is 1 TOhm) and
                 // the missing junction leakage place them: the BA662's mirrors with no tail current, the diode
                 // string, Q41's emitter.
@@ -275,9 +274,9 @@ public:
                     "xvca.nn4", "xvca.ne41" };
                 // At rest the filter settles on the saw's mean (8.35 V), ngspice on the saw at its start (8.10 V).
                 static const std::set<std::string> settledInput = { "nwave", "xvcf.n17" };
-                if (baseCurrents.count(n) > 0)
-                    return { 0.4, 0.6 };
-                if (q18.count(n) > 0 || settledInput.count(n) > 0)
+                if (accentRing.count(n) > 0)
+                    return { 0.02, 0.32 };
+                if (settledInput.count(n) > 0)
                     return { 0.035, 0.25 };
                 if (floating.count(n) > 0)
                     return { 0.2, 0.25 };
@@ -289,8 +288,8 @@ public:
                     return { 0.02, 0.55 };
                 if (n == "xvcf.c19.i") // the ladder's top capacitor, the ring itself: at the default knob's resonance
                     return { 0.02, 0.4 }; // on the fitted track (0.87 of the pot, CoolSynth's D324) its phase drift shows
-                // The filter's residual (1.5 to 5 % off vcf.cir, the ring's amplitude a third under ngspice's at
-                // the accent) at moments that fall at any phase of the oscillator and the ring.
+                // The voice's residual (the filter 0.4 to 1.1 % off vcf.cir since D360, the ring's amplitude under
+                // ngspice's at the accent) at moments that fall at any phase of the oscillator and the ring.
                 return { 0.02, 0.25 };
             };
             std::vector<std::size_t> order(series);

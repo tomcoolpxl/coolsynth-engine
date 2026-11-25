@@ -27,7 +27,8 @@
     b = S a + Q u, with u the ideal inputs. The nonlinear ports are solved at the root each sample by Newton's method
     in their port voltages (Werner, Nangia, Smith, Abel, DAFx 2015; Olsen, Werner, Smith, DAFx 2016), started from
     where the last samples point (solveDevices), with SPICE's junction limiting. Diodes and transistors follow the thesis's models
-    (Shockley; Ebers-Moll in transport form). Double precision; all storage inline, no heap.
+    (Shockley; Ebers-Moll in transport form), with Gummel-Poon's forward Early effect and base recombination where a
+    circuit gives them. Double precision; all storage inline, no heap.
 */
 namespace coolsynth::synth::v3::wdf
 {
@@ -123,8 +124,12 @@ namespace coolsynth::synth::v3::wdf
                 addClampPair(inner, 0, railVolts - 0.55, 1.0e-12, 0.02585);
         }
 
-        /** A junction diode from anode to cathode (Shockley), its port seen through portOhms. */
-        void addDiode(int anode, int cathode, double saturation, double thermal, double portOhms = 1000.0)
+        /** A junction diode from anode to cathode (Shockley), its port seen through portOhms. With recombination, a
+            second, low-current term beside it, recombination (e^(v / recombinationThermal) - 1): a diode-wired
+            transistor's base recombination (Gummel-Poon's ISE, its thermal voltage NE VT; CoolSynth's D360). 0, none:
+            every circuit without it bit for bit as before. */
+        void addDiode(int anode, int cathode, double saturation, double thermal, double portOhms = 1000.0,
+                      double recombination = 0.0, double recombinationThermal = 0.0)
         {
             if (deviceCount >= MaxNonlinear || nonlinearCount + 1 > MaxNonlinear || portCount + 1 > MaxPorts)
             {
@@ -135,6 +140,7 @@ namespace coolsynth::synth::v3::wdf
             d.isTransistor = false;
             d.saturation = saturation;
             d.thermal = thermal;
+            d.setRecombination(recombination, recombinationThermal);
             d.derive();
             d.port[0] = addPort(anode, cathode, Kind::nonlinear, portOhms, 0.0, 1.0);
             d.slot[0] = nonlinearCount++;
@@ -183,9 +189,11 @@ namespace coolsynth::synth::v3::wdf
 
         /** An NPN transistor (Ebers-Moll, transport form), as two ports: base-emitter and collector-emitter. With
             earlyVolts, its forward Early effect as SPICE's Gummel-Poon has it (the transport current times
-            1 - Vbc / VAF; D279); 0, none (the 808's circuits, bit for bit as before). */
+            1 - Vbc / VAF; D279); 0, none (the 808's circuits, bit for bit as before). With recombination, Gummel-Poon's
+            base recombination: ISE (e^(Vbe / (NE VT)) - 1) more into the base and out of the emitter, the collector's
+            current as it was (recombinationThermal NE VT; CoolSynth's D360); 0, none, bit for bit as before. */
         void addTransistor(int collector, int base, int emitter, double saturation, double betaF, double betaR, double thermal,
-                           double earlyVolts = 0.0)
+                           double earlyVolts = 0.0, double recombination = 0.0, double recombinationThermal = 0.0)
         {
             if (deviceCount >= MaxNonlinear || nonlinearCount + 2 > MaxNonlinear || portCount + 2 > MaxPorts)
             {
@@ -199,6 +207,7 @@ namespace coolsynth::synth::v3::wdf
             d.betaF = betaF;
             d.betaR = betaR;
             d.thermal = thermal;
+            d.setRecombination(recombination, recombinationThermal);
             d.derive();
             d.port[0] = addPort(base, emitter, Kind::nonlinear, 2000.0, 0.0, 1.0);
             d.port[1] = addPort(collector, emitter, Kind::nonlinear, 20000.0, 0.0, 1.0);
@@ -212,10 +221,10 @@ namespace coolsynth::synth::v3::wdf
 
         /** A PNP transistor: the NPN's equations with every voltage and current turned round. */
         void addPnpTransistor(int collector, int base, int emitter, double saturation, double betaF, double betaR, double thermal,
-                              double earlyVolts = 0.0)
+                              double earlyVolts = 0.0, double recombination = 0.0, double recombinationThermal = 0.0)
         {
             const int before = deviceCount;
-            addTransistor(collector, base, emitter, saturation, betaF, betaR, thermal, earlyVolts);
+            addTransistor(collector, base, emitter, saturation, betaF, betaR, thermal, earlyVolts, recombination, recombinationThermal);
             if (deviceCount > before)
                 devices[static_cast<std::size_t>(deviceCount - 1)].polarity = -1.0;
         }
@@ -603,6 +612,15 @@ namespace coolsynth::synth::v3::wdf
             // Derived once, for the solver: 1 / VT, 1 / betaF, 1 / betaR, 1 + 1 / betaR, pnjlim's critical voltage.
             double inverseThermal = 1.0 / 0.02585, inverseBetaF = 0.01, inverseBetaR = 1.0, reverseFactor = 2.0, critical = 0.6;
             double inverseEarly = 0.0; // 1 / VAF; 0 without the Early effect
+            // The base recombination term (addDiode, addTransistor): ISE and 1 / (NE VT); 0, none.
+            double recombination = 0.0, inverseRecombinationThermal = 0.0;
+
+            void setRecombination(double ise, double recombinationThermal) noexcept
+            {
+                const bool on = ise > 0.0 && recombinationThermal > 0.0;
+                recombination = on ? ise : 0.0;
+                inverseRecombinationThermal = on ? 1.0 / recombinationThermal : 0.0;
+            }
 
             void derive() noexcept
             {
@@ -1149,6 +1167,12 @@ namespace coolsynth::synth::v3::wdf
                     const double e = std::exp(std::min(v[s0] * dev.inverseThermal, 80.0));
                     i[s0] = dev.saturation * (e - 1.0);
                     g[s0][s0] = dev.saturation * e * dev.inverseThermal;
+                    if (dev.recombination != 0.0) // added after, so a diode without it keeps its bits
+                    {
+                        const double el = std::exp(std::min(v[s0] * dev.inverseRecombinationThermal, 80.0));
+                        i[s0] += dev.recombination * (el - 1.0);
+                        g[s0][s0] += dev.recombination * el * dev.inverseRecombinationThermal;
+                    }
                     continue;
                 }
                 const int s1 = dev.slot[1];
@@ -1162,6 +1186,12 @@ namespace coolsynth::synth::v3::wdf
                 i[s0] = sign * (iF * dev.inverseBetaF + iR * dev.inverseBetaR);
                 g[s0][s0] = gF * dev.inverseBetaF + gR * dev.inverseBetaR;
                 g[s0][s1] = -gR * dev.inverseBetaR;
+                if (dev.recombination != 0.0) // base to emitter only; added after, so a transistor without it keeps its bits
+                {
+                    const double el = std::exp(std::min(vbe * dev.inverseRecombinationThermal, 80.0));
+                    i[s0] += sign * (dev.recombination * (el - 1.0));
+                    g[s0][s0] += dev.recombination * el * dev.inverseRecombinationThermal;
+                }
                 if (dev.inverseEarly == 0.0)
                 {
                     i[s1] = sign * (iF - iR * dev.reverseFactor);

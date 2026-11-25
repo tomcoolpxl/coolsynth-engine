@@ -41,13 +41,18 @@
         Q1A (BA662)             in the envelope's circuit, a diode-wired transistor that also carries Q1B's base current
                                 (IS (1 + 2 / hFE)): its collector and base the diode's current in that ratio. Q1B in the
                                 chip, its base on pin 1's voltage as the envelope hands it
-        Diode-wired transistors the ladder's rungs (Q13 to Q23) and the chip's Q3B, Q4B, Q6B, Q9B are diodes of IS
-                                (1 + 1 / hFE): collector and base the diode's current split hFE to one (a PNP's negative)
-        Base recombination      Q41, Q40, Q32's base currents with the diode that stands for Gummel-Poon's ISE; the
-                                other transistors have none (ngspice's QEM does, so their base currents read low at uA)
-        Q20                     a fixed current into the loop's tail (the source behind 1 GOhm, its current as drawn);
-                                R112 and R109 one 20k in the loop: Q20's base node from their divider less Q20's base
-                                current (hFE 416.4) through their 5k, its emitter from R108 (2.2k) and the current
+        Diode-wired transistors the ladder's rungs (Q13 to Q23) are diodes of IS (1 + 1 / hFE) with the 2N3904's base
+                                recombination: the collector IS (e^(V / VT) - 1) from the rung's voltage, the base the
+                                rest. The chip's Q3B, Q4B, Q6B, Q9B are diodes of IS (1 + 1 / hFE): collector and base
+                                the diode's current split hFE to one (a PNP's negative)
+        Base recombination      the filter's 2N3904s (Q11, Q18, Q19, the rungs, Q20) carry Gummel-Poon's ISE in their
+                                own junctions (CoolSynth's D360); Q41, Q40, Q32 with the diode that stands for it; the
+                                envelope's and the chip's other transistors have none (ngspice's QEM does, so their base
+                                currents read low at uA)
+        Q20                     a fixed current into the loop's tail (the source behind 1 GOhm, its current as drawn),
+                                solved at rest with its base current; R112 and R109 one Thevenin source in the loop:
+                                Q20's base node from their divider less its base current through their 5k, its emitter
+                                from R108 (2.2k) and the tail with its base current
         The op-amps             each a 1 MHz single-pole macro (ideal follower out); its output current is what its
                                 output node's parts draw (KCL), with D30 and D31 on IC11b's computed from their nodes
         D30, D31                not in the engine (off at every note): Shockley from their nodes, as vco.cir's 1N4148
@@ -68,9 +73,9 @@ namespace coolsynth::synth::v3
     {
         /** What a series reads: a node, a port's current (scaled), two ports' summed, an ideal source's current into
             its + terminal (minus what its node's ports draw), nothing, a constant, or a case of its own. */
-        enum class Tap : unsigned char { node, port, ports, source, zero, constant, special };
+        enum class Tap : unsigned char { node, port, ports, source, zero, constant, special, rung };
         enum class On : unsigned char { pitch, shaper, converter, loop, envelope, chip, buffer, none };
-        enum Special : short { opAmpB, d31, d30, c33, j28, r105, r112, r109, nb20, ne20, nacc, nc33, nns, nsl };
+        enum Special : short { opAmpB, d31, d30, c33, j28, r105, r112, r109, nb20, ne20, nacc, nc33, nns, nsl, q20b, r108 };
 
         /** A series: how it is read, and for a port the nodes and kind it must have in its circuit (Tb303Lid::check;
             n1 -1 for either, value 0 for any). */
@@ -95,17 +100,23 @@ namespace coolsynth::synth::v3
         {
             return { n, Tap::ports, on, static_cast<short>(port), static_cast<short>(aux), 1.0, static_cast<short>(n1), static_cast<short>(n2), 'n', 0.0 };
         }
+        /** A ladder rung (a diode-wired 2N3904 in the loop): its collector (collector true) or its base current, the
+            diode's current split as the transistor splits it, IS (e^(V / VT) - 1) into the collector, the rest (IS / hFE
+            and the recombination) into the base. */
+        constexpr Series rung(const char* n, int port, int n1, int n2, bool collector)
+        {
+            return { n, Tap::rung, On::loop, static_cast<short>(port), static_cast<short>(collector ? 1 : 0), 1.0,
+                     static_cast<short>(n1), static_cast<short>(n2), 'n', 0.0 };
+        }
         constexpr Series source(const char* n, On on, int k) { return { n, Tap::source, on, static_cast<short>(k), 0, 1.0, 0, 0, 0, 0.0 }; }
         constexpr Series zero(const char* n) { return { n, Tap::zero, On::none, 0, 0, 0.0, 0, 0, 0, 0.0 }; }
         constexpr Series fixed(const char* n, double volts) { return { n, Tap::constant, On::none, 0, 0, volts, 0, 0, 0, 0.0 }; }
         constexpr Series special(const char* n, Special s) { return { n, Tap::special, On::none, static_cast<short>(s), 0, 1.0, 0, 0, 0, 0.0 }; }
 
         // The split of a diode-wired transistor's current: collector hFE / (hFE + 1), base 1 / (hFE + 1).
-        constexpr double rungC = 416.4 / 417.4, rungB = 1.0 / 417.4;      // QEM, the ladder's 2SC945s
         constexpr double npnC = 150.0 / 151.0, npnB = 1.0 / 151.0;         // the BA662's NPNs
         constexpr double pnpC = -50.0 / 51.0, pnpB = -1.0 / 51.0;          // its lateral PNPs, from emitter to base
         constexpr double q1aC = 150.0 / 152.0, q1aB = 1.0 / 152.0;         // Q1A, with Q1B's base current
-        constexpr double tailB = 1.0 / 416.4, tailE = 417.4 / 416.4;       // Q20's base and emitter over its collector
 
         constexpr On P = On::pitch, H = On::shaper, C = On::converter, L = On::loop, E = On::envelope, X = On::chip, B = On::buffer;
 
@@ -175,18 +186,18 @@ namespace coolsynth::synth::v3
             amps("xvcf.q12l.ib", L, 8, 6, 18, 'n'),
             amps("xvcf.q12r.ic", L, 11, 13, 18, 'n'),
             amps("xvcf.q12r.ib", L, 10, 8, 18, 'n'),
-            amps("xvcf.q13.ic", L, 12, 10, 9, 'n', rungC),       // the rungs: diodes, split hFE to one
-            amps("xvcf.q13.ib", L, 12, 10, 9, 'n', rungB),
-            amps("xvcf.q14.ic", L, 13, 11, 10, 'n', rungC),
-            amps("xvcf.q14.ib", L, 13, 11, 10, 'n', rungB),
-            amps("xvcf.q16.ic", L, 14, 12, 11, 'n', rungC),
-            amps("xvcf.q16.ib", L, 14, 12, 11, 'n', rungB),
-            amps("xvcf.q15.ic", L, 15, 14, 13, 'n', rungC),
-            amps("xvcf.q15.ib", L, 15, 14, 13, 'n', rungB),
-            amps("xvcf.q17.ic", L, 16, 15, 14, 'n', rungC),
-            amps("xvcf.q17.ib", L, 16, 15, 14, 'n', rungB),
-            amps("xvcf.q23.ic", L, 17, 16, 15, 'n', rungC),
-            amps("xvcf.q23.ib", L, 17, 16, 15, 'n', rungB),
+            rung("xvcf.q13.ic", 12, 10, 9, true),                // the rungs: diodes, split as the transistor splits
+            rung("xvcf.q13.ib", 12, 10, 9, false),
+            rung("xvcf.q14.ic", 13, 11, 10, true),
+            rung("xvcf.q14.ib", 13, 11, 10, false),
+            rung("xvcf.q16.ic", 14, 12, 11, true),
+            rung("xvcf.q16.ib", 14, 12, 11, false),
+            rung("xvcf.q15.ic", 15, 14, 13, true),
+            rung("xvcf.q15.ib", 15, 14, 13, false),
+            rung("xvcf.q17.ic", 16, 15, 14, true),
+            rung("xvcf.q17.ib", 16, 15, 14, false),
+            rung("xvcf.q23.ic", 17, 16, 15, true),
+            rung("xvcf.q23.ib", 17, 16, 15, false),
             amps("xvcf.c18.i", L, 24, 9, 13, 'c'),
             amps("xvcf.c19.i", L, 25, 10, 14, 'c'),
             amps("xvcf.c24.i", L, 26, 11, 15, 'c'),
@@ -212,8 +223,8 @@ namespace coolsynth::synth::v3
             special("xvcf.r112.i", r112),                        // R112 and R109: one 20k in the loop
             special("xvcf.r109.i", r109),
             amps("xvcf.q20.ic", L, 47, 24, 0, 'v'),              // Q20: the tail's fixed current
-            amps("xvcf.q20.ib", L, 47, 24, 0, 'v', tailB),
-            amps("xvcf.r108.i", L, 47, 24, 0, 'v', tailE),
+            special("xvcf.q20.ib", q20b),                        // its base current as the filter solved it
+            special("xvcf.r108.i", r108),                        // the tail and its base current
             amps("xvcf.q19.ic", L, 49, 4, 25, 'n'),
             amps("xvcf.q19.ib", L, 48, 23, 25, 'n'),
             amps("xvcf.r96.i", L, 50, 25, 0, 'r'),
@@ -536,6 +547,12 @@ namespace coolsynth::synth::v3
                     case lid::Tap::zero: x = 0.0; break;
                     case lid::Tap::constant: x = s.scale; break;
                     case lid::Tap::special: x = special(voice, v, static_cast<lid::Special>(s.index)); break;
+                    case lid::Tap::rung:
+                    {
+                        const double ic = Tb303Filter::npnSaturation * (std::exp(std::min((v.loop[s.n1] - v.loop[s.n2]) / Tb303Filter::thermal, 80.0)) - 1.0);
+                        x = s.aux != 0 ? ic : currentOf(voice, v, s.on, s.index) - ic;
+                        break;
+                    }
                 }
                 out[i] = static_cast<float>(x);
             }
@@ -549,7 +566,7 @@ namespace coolsynth::synth::v3
             for (int i = 0; i < lid::tableSize; ++i)
             {
                 const lid::Series& s = lid::table[i];
-                if (s.tap != lid::Tap::port && s.tap != lid::Tap::ports)
+                if (s.tap != lid::Tap::port && s.tap != lid::Tap::ports && s.tap != lid::Tap::rung)
                     continue;
                 bool ok = matches(portOf(voice, s.on, s.index), s.n1, s.n2, s.kind, s.value);
                 if (s.tap == lid::Tap::ports)
@@ -674,7 +691,9 @@ namespace coolsynth::synth::v3
                 case lid::r112: return (v.loop[19] - q20Base(voice, v)) / 10.0e3;
                 case lid::r109: return q20Base(voice, v) / 10.0e3;
                 case lid::nb20: return q20Base(voice, v);
-                case lid::ne20: return 2.2e3 * lid::tailE * vcf.loop.portCurrent(vcf.sTail, v.loop);
+                case lid::ne20: return 2.2e3 * (vcf.loop.portCurrent(vcf.sTail, v.loop) + vcf.tailBaseAmps);
+                case lid::q20b: return vcf.tailBaseAmps;
+                case lid::r108: return vcf.loop.portCurrent(vcf.sTail, v.loop) + vcf.tailBaseAmps;
                 case lid::nacc: return voice.envelope().accented ? 12.0 : 0.0;
                 case lid::nc33: return osc.c33;
                 case lid::nns: return osc.sliding ? 0.0 : 1.0;
@@ -686,9 +705,7 @@ namespace coolsynth::synth::v3
         /** Q20's base: R112 and R109's divider from the loop's nbias, less Q20's base current through their 5k. */
         static double q20Base(const Tb303Voice& voice, const Volts& v) noexcept
         {
-            const Tb303Filter& vcf = voice.vcf();
-            const double base = lid::tailB * vcf.loop.portCurrent(vcf.sTail, v.loop);
-            return 0.5 * v.loop[19] - 5.0e3 * base;
+            return 0.5 * v.loop[19] - 5.0e3 * voice.vcf().tailBaseAmps;
         }
     };
 }
