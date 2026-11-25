@@ -141,6 +141,23 @@ namespace coolsynth::synth::v3
             return resonanceLoop * t * t / (t * t + u * u);
         }
 
+        /** CUTOFF's and ENV MOD's track (VR3 and VR5, one part: Roland 13219340, 50k A, by Alps): the share of the pot
+            from pin 1 at a turn of the knob, fitted to Din Sync's unit (CoolSynth's D364). A carbon log pot is
+            straight segments (Alps's catalogue A curve: some 2.5 % at a fifth of the turn, 18 % at half, 59 % at
+            three quarters, all of it by 95 %; JIS 15A asks only 10 to 25 % at half). The unit's marks put a quarter
+            turn at 2.5 %, half at 15 % and three quarters at 57 to 60 % on both knobs: 0.025, 0.15, then straight to
+            the end, 0.575 at three quarters. The exponential before it (15 % at half, 4.4 % and 40 %) left the sets
+            with every other knob at three quarters 0.58 octave dark and those at a quarter 3.9 dB bright. */
+        static double audioTrack(double turn) noexcept
+        {
+            const double t = std::clamp(turn, 0.0, 1.0);
+            if (t <= 0.25)
+                return 0.1 * t;
+            if (t <= 0.5)
+                return 0.025 + 0.5 * (t - 0.25);
+            return 0.15 + 1.7 * (t - 0.5);
+        }
+
         /** The panel's knobs, each its turn 0..1, and the WAVEFORM switch. VOLUME (VR8) is the output stage's pot,
             ahead of the mixer: full, as Din Sync recorded the unit, loud notes clip on the mixer's lower side. */
         struct Knobs
@@ -168,7 +185,7 @@ namespace coolsynth::synth::v3
         {
             knobs = k;
             osc->setTrimmers(trim.tm4, trim.tm5, k.tuning, trim.c11);
-            filter->setKnobs(k.cutoff, resonanceTrack(k.resonance), k.envMod, trim.tm3);
+            filter->setKnobs(audioTrack(k.cutoff), resonanceTrack(k.resonance), audioTrack(k.envMod), trim.tm3);
             env->setKnobs(k.decay, k.accent);
             stage->setVolume(k.volume);
             if (fish)

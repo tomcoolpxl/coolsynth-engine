@@ -35,7 +35,8 @@
     rest as the same 2N3904 from the bias divider the loop leaves (Q21's base currents on it) and its own base
     current; the loop's R112 and R109 as their Thevenin equivalent from nbias, Q20's base current drawn through them.
     Without the recombination and the capacitance the filter sat 1.7 to 4.8 % off vcf.cir on the test's cases, 10 %
-    at cutoff 0.9 with full resonance (CoolSynth's D360). The audio-taper pots as 15 % at half turn. ngspice's 27 C
+    at cutoff 0.9 with full resonance (CoolSynth's D360). The pots as their shares (the knobs' tracks are the voice's,
+    CoolSynth's D324 and D364). ngspice's 27 C
     thermal voltage. The 12 V rail at 11.85 V (IC16, D275). Volts in, volts out.
 */
 namespace coolsynth::synth::v3
@@ -146,10 +147,12 @@ namespace coolsynth::synth::v3
             loop.setSampleRate(rate);
         }
 
-        /** The knobs, each its turn 0..1, and TM3 (0..1 of 470 kOhm). Changing one re-analyses its circuit. */
+        /** The pots, each its share from pin 1 0..1 (the voice maps the knobs' turns: Tb303Voice's audioTrack and
+            resonanceTrack), and TM3 (0..1 of 470 kOhm). Changing one re-analyses its circuit. */
         void setKnobs(double cutoff, double resonance, double envMod, double tm3) noexcept
         {
-            const double tc = audioTaper(cutoff), te = audioTaper(envMod), r = std::clamp(resonance, 0.0, 1.0);
+            const double tc = std::clamp(cutoff, 0.0, 1.0), te = std::clamp(envMod, 0.0, 1.0),
+                         r = std::clamp(resonance, 0.0, 1.0);
             converter.setResistance(rCut3, std::max(50.0e3 * (1.0 - tc), 1.0));
             converter.setResistance(rCut1, std::max(50.0e3 * tc, 1.0));
             converter.setResistance(rEnv3, std::max(50.0e3 * (1.0 - te), 1.0));
@@ -223,7 +226,8 @@ namespace coolsynth::synth::v3
         [[nodiscard]] int newtonSteps() const noexcept { return std::max(converter.lastNewtonSteps(), loop.lastNewtonSteps()); }
         [[nodiscard]] bool lastSolveConverged() const noexcept { return converter.lastSolveConverged() && loop.lastSolveConverged(); }
 
-        /** An audio-taper pot's share from pin 1 at a turn: 15 % at half turn (vcf.cir's). */
+        /** An audio-taper pot's share from pin 1 at a turn: 15 % at half turn (out.cir's VOLUME; CUTOFF and ENV MOD
+            had it before D364). */
         static double audioTaper(double turn) noexcept
         {
             constexpr double k = 3.47;

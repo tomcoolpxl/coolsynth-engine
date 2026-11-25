@@ -7,7 +7,8 @@ Din Sync's chart: SET-A1 to A5 turn CUTOFF, RESONANCE, ENV MOD, DECAY, ACCENT fr
 0 %; sets B, C, D and E the same with the others at 25, 50, 75 and 100 %.
 
 voice.cir is taken at its OUTPUT jack (njack, VOLUME full, the recorder's load as fitted; CoolSynth's D362), RESONANCE
-through the engine's track (Tb303Voice::resonanceTrack, its loop's share as --loop). The accent's loudness is the
+through the engine's track (Tb303Voice::resonanceTrack, its loop's share as --loop), CUTOFF and ENV MOD through
+theirs (Tb303Voice::audioTrack, D364). The accent's loudness is the
 RMS over 30 to 80 ms weighted by time: ngspice's steps crowd on fast edges, and a plain mean of its samples put
 voice.cir up to 1.7 dB under the engine on set E (D362).
 
@@ -44,6 +45,16 @@ def resonance_track(turn, loop):
     return loop * t * t / (t * t + u * u)
 
 
+def audio_track(turn):
+    """Tb303Voice::audioTrack: CUTOFF's and ENV MOD's pot share at a turn of the knob (CoolSynth's D364)."""
+    t = min(max(turn, 0.0), 1.0)
+    if t <= 0.25:
+        return 0.1 * t
+    if t <= 0.5:
+        return 0.025 + 0.5 * (t - 0.25)
+    return 0.15 + 1.7 * (t - 0.5)
+
+
 def render(values, accented, tm3, c11, out, model=None, loop=0.96):
     if model:
         # The engine's voice (D295): a program taking "csv cutoff res envmod decay accent accented out.csv" that writes
@@ -56,6 +67,8 @@ def render(values, accented, tm3, c11, out, model=None, loop=0.96):
     sets = dict(values, cv=2.0, sq=0, ton=TON, toff=TON + 0.25, taoff=TON + 0.25, acc=12 if accented else 0, tm3=tm3,
                 c11=c11, q1area=22)  # the BA662's input pair as fitted (CoolSynth's D324)
     sets["res"] = resonance_track(values["res"], loop)
+    sets["cutoff"] = audio_track(values["cutoff"])
+    sets["envmod"] = audio_track(values["envmod"])
     for k, v in sets.items():
         command += ["--set", "{}={}".format(k, v)]
     subprocess.run(command, check=True, capture_output=True)

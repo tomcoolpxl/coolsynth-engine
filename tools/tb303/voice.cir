@@ -21,7 +21,7 @@
 .param rtm5={max(4.7k*tm5, 1)}
 .param rv2a={max(50k*(1-tune), 1)}
 .param rv2b={max(50k*tune, 1)}
-.param cutoff=0.5
+.param cutoff=0.15
 .param res=1
 .param envmod=0
 .param acc=0
@@ -29,13 +29,10 @@
 .param acc2=-1
 .param tstep=1
 .param tm3=0.1642
-.param ka=3.47
-.param tcut={(exp(ka*cutoff)-1)/(exp(ka)-1)}
-.param tenv={(exp(ka*envmod)-1)/(exp(ka)-1)}
-.param rcut1={max(50k*tcut, 1)}
-.param rcut3={max(50k*(1-tcut), 1)}
-.param renv1={max(50k*tenv, 1)}
-.param renv3={max(50k*(1-tenv), 1)}
+.param rcut1={max(50k*cutoff, 1)}
+.param rcut3={max(50k*(1-cutoff), 1)}
+.param renv1={max(50k*envmod, 1)}
+.param renv3={max(50k*(1-envmod), 1)}
 .param rres1={max(50k*res, 1)}
 .param rres3={max(50k*(1-res), 1)}
 .param rtm3={max(470k*tm3, 1)}
@@ -45,6 +42,7 @@
 .param toff=72.5m
 .param taoff=135m
 .param q1area=1
+.param ka=3.47
 .param tdec={(exp(ka*decay)-1)/(exp(ka)-1)}
 .param rdec={max(1Meg*tdec, 1)}
 .param racc1={max(50k*accent, 1)}

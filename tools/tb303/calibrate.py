@@ -81,7 +81,8 @@ def vco():
 
 
 def ring_ms(tm3):
-    out = render("vcf.cir", {"tm3": tm3, "cutoff": 0.5, "res": 1, "envmod": 0, "acc": 0}, "ntp6,nin", 0.25, 2e-6)
+    # CUTOFF at its centre: its pot's share there (Tb303Voice::audioTrack, CoolSynth's D364)
+    out = render("vcf.cir", {"tm3": tm3, "cutoff": 0.15, "res": 1, "envmod": 0, "acc": 0}, "ntp6,nin", 0.25, 2e-6)
     return inspect_vcf.measure(out, 0.15)["ring_ms"]
 
 

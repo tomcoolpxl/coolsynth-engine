@@ -264,8 +264,11 @@ public:
                 // currents, R66's and R99's, Q18's emitter within the default allowances, at rest within 1.3 %). The
                 // accented note's ring on C14's side at 150 ms, its amplitude under ngspice's (vcf.cir's accent case
                 // within 1.1 % of its swing): 24.4 % there before D360, 26.8 % after, the moment at the ring's phase.
+                // With ENV MOD's share on its fitted track (0.235 at the default knob, CoolSynth's D364) the ladder's
+                // C24 at that moment too: 28.7 %.
                 static const std::set<std::string> accentRing = {
-                    "nvcf", "nresw", "xvcf.rres1.i", "xvcf.rres3.i", "xvcf.c14.i", "xvcf.c15.i", "xvcf.r67.i", "xvcf.c22.i" };
+                    "nvcf", "nresw", "xvcf.rres1.i", "xvcf.rres3.i", "xvcf.c14.i", "xvcf.c15.i", "xvcf.r67.i", "xvcf.c22.i",
+                    "xvcf.c24.i" };
                 // Nodes that only nanoamps hold at rest, where the engine's 1 GOhm leaks (SPICE's GMIN is 1 TOhm) and
                 // the missing junction leakage place them: the BA662's mirrors with no tail current, the diode
                 // string, Q41's emitter.

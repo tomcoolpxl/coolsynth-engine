@@ -260,6 +260,8 @@ public:
 
         beginTest("the_filter_matches_spice");
         {
+            // cutoff and envMod as turns of the audio taper the references were rendered with (vcf.cir took turns
+            // before D364): the filter takes the pots' shares, Tb303Filter::audioTaper of these.
             const FilterCase cases[] = {
                 { "ring.csv", 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0 },
                 { "envmod.csv", 0.3, 0.7, 0.6, 8.0, 0.0, 8.0, 0.0, 1.0 },
@@ -277,7 +279,7 @@ public:
                 auto filter = std::make_unique<Tb303Filter>();
                 expect(filter->fitsItsLimits(), "the filter's circuits fit their templates");
                 filter->prepare(ref.rate);
-                filter->setKnobs(c.cutoff, c.resonance, c.envMod, 0.1642);
+                filter->setKnobs(Tb303Filter::audioTaper(c.cutoff), c.resonance, Tb303Filter::audioTaper(c.envMod), 0.1642);
                 const double freq = 65.406;
                 const auto tolerance = juce::SystemStats::getEnvironmentVariable("COOLSYNTH_303_TOLERANCE", {});
                 if (tolerance.isNotEmpty())
@@ -343,7 +345,7 @@ public:
                     auto exact = std::make_unique<Tb303Filter>();
                     exact->setJacobianReuse(false);
                     exact->prepare(ref.rate);
-                    exact->setKnobs(c.cutoff, c.resonance, c.envMod, 0.1642);
+                    exact->setKnobs(Tb303Filter::audioTaper(c.cutoff), c.resonance, Tb303Filter::audioTaper(c.envMod), 0.1642);
                     exact->settle(8.35, c.envelope, c.accent);
                     double e = 0.0;
                     std::vector<double> exactTp6(n);

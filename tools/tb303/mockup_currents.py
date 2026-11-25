@@ -44,8 +44,9 @@ NGSPICE = next((p for p in _NGSPICE_PLACES if p and os.path.isfile(p)), _NGSPICE
 NETLIST = os.path.join(HERE, "voice.cir")
 
 # The app's default knobs (saw), and the BA662's input pair as the engine has it fitted (CoolSynth's D324). res is
-# the pot's share at the knob's 0.72 (Tb303Voice::resonanceTrack: the fitted S-shaped track, times the loop's 0.96).
-KNOBS = {"cutoff": 0.42, "res": 0.833888, "envmod": 0.55, "decay": 0.48, "accent": 0.62, "sq": 0, "tune": 0.5,
+# the pot's share at the knob's 0.72 (Tb303Voice::resonanceTrack: the fitted S-shaped track, times the loop's 0.96);
+# cutoff and envmod the pots' shares at the knobs' 0.42 and 0.55 (Tb303Voice::audioTrack, CoolSynth's D364).
+KNOBS = {"cutoff": 0.11, "res": 0.833888, "envmod": 0.235, "decay": 0.48, "accent": 0.62, "sq": 0, "tune": 0.5,
          "q1area": 22}
 # The op-amps' solver aids, left out of the drawing.
 AIDS = {"ga", "ria", "cia", "dcpa", "vcpa", "dcna", "vcna", "gb", "rib", "cib", "dcpb", "vcpb", "dcnb", "vcnb"}
