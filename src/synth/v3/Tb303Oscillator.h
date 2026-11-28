@@ -59,8 +59,18 @@ namespace coolsynth::synth::v3
             shaper.setNewtonLimit(40);
             pitch.setNewtonTolerance(Tb303Filter::newtonTolerance);
             shaper.setNewtonTolerance(Tb303Filter::newtonTolerance);
+            setJacobianReuse(true);
             buildPitch();
             buildShaper();
+        }
+
+        /** The chord method (D281) on both circuits, on by default (CoolSynth's D372): the oscillator some 8 % cheaper,
+            the saw within -109 dB of the exact solve, the square within -95 dB. Off solves each step exactly, for the
+            tests. */
+        void setJacobianReuse(bool on) noexcept
+        {
+            pitch.setJacobianReuse(on);
+            shaper.setJacobianReuse(on);
         }
 
         /** The square's shaper's tolerance (the 303's accuracy, CoolSynth's D349). The pitch circuit keeps its 10 nV
