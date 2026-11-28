@@ -19,7 +19,10 @@ namespace coolsynth::synth
     };
 
     inline constexpr int maxArpHeldNotes = 16;
-    inline constexpr int maxArpLatchedNotes = 16;
+    // Under Latch every key press is a step, the same key again too (CoolSynth's D373): a line of up to 64, as
+    // Arturia's KeyStep builds one with Hold. Only As Played plays the line as it is; the other patterns take its
+    // notes once each, the 16 pressed last.
+    inline constexpr int maxArpLatchedNotes = 64;
     inline constexpr int maxArpRingingNotes = 32;
     inline constexpr int maxArpEventsPerBlock = 64;
 
@@ -88,7 +91,8 @@ namespace coolsynth::synth
                                int maxEvents) noexcept;
 
         int computeStepsPerBeat() const noexcept;
-        int buildOrderedWorkingSet(std::array<HeldEntry, maxArpHeldNotes>& ordered) const noexcept;
+        int buildOrderedWorkingSet(std::array<HeldEntry, maxArpLatchedNotes>& ordered) const noexcept;
+        [[nodiscard]] bool isHeld(int noteNumber) const noexcept;
         void resetPatternWalkState() noexcept;
         void updateEuclideanCycle() noexcept;
         bool shouldEmitEuclideanStep(int hostStepIndex) noexcept;

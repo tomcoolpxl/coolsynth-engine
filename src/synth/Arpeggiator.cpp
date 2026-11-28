@@ -161,10 +161,20 @@ namespace coolsynth::synth
         if (currentParameters.latch && heldNoteCount == 0)
             clearLatched();
 
+        // A key that is down cannot be pressed again: a second note-on for it is the same press, not a new step.
+        const bool newPress = ! isHeld(noteNumber);
         addNoteToHeld(noteNumber, velocity);
 
-        if (currentParameters.latch)
+        if (currentParameters.latch && newPress)
             addNoteToLatched(noteNumber, velocity);
+    }
+
+    bool Arpeggiator::isHeld(int noteNumber) const noexcept
+    {
+        for (int i = 0; i < heldNoteCount; ++i)
+            if (heldNotes[static_cast<size_t>(i)].noteNumber == noteNumber)
+                return true;
+        return false;
     }
 
     void Arpeggiator::onNoteOff(int noteNumber) noexcept
@@ -328,7 +338,7 @@ namespace coolsynth::synth
 
             if (currentParameters.pattern == coolsynth::parameters::ArpPatternChoice::chord)
             {
-                std::array<HeldEntry, maxArpHeldNotes> ordered {};
+                std::array<HeldEntry, maxArpLatchedNotes> ordered {};
                 const int workingSetSize = buildOrderedWorkingSet(ordered);
 
                 if (workingSetSize > 0)
@@ -496,17 +506,7 @@ namespace coolsynth::synth
 
     void Arpeggiator::addNoteToLatched(int noteNumber, float velocity) noexcept
     {
-        for (int i = 0; i < latchedNoteCount; ++i)
-        {
-            if (latchedNotes[static_cast<size_t>(i)].noteNumber == noteNumber)
-            {
-                latchedNotes[static_cast<size_t>(i)].velocity = velocity;
-                latchedNotes[static_cast<size_t>(i)].order = ++nextLatchedOrder;
-                resetPatternWalkState();
-                return;
-            }
-        }
-
+        // Every press is a step of the line, a key pressed again too (CoolSynth's D373).
         if (latchedNoteCount >= maxArpLatchedNotes)
         {
             for (int i = 0; i < latchedNoteCount - 1; ++i)
@@ -629,7 +629,7 @@ namespace coolsynth::synth
         return 4;
     }
 
-    int Arpeggiator::buildOrderedWorkingSet(std::array<HeldEntry, maxArpHeldNotes>& ordered) const noexcept
+    int Arpeggiator::buildOrderedWorkingSet(std::array<HeldEntry, maxArpLatchedNotes>& ordered) const noexcept
     {
         const HeldEntry* workingSet = nullptr;
         int workingSetSize = 0;
@@ -651,17 +651,33 @@ namespace coolsynth::synth
         for (int i = 0; i < workingSetSize; ++i)
             ordered[static_cast<size_t>(i)] = workingSet[static_cast<size_t>(i)];
 
-        if (usesPlayOrder(currentParameters.pattern))
+        // The line as pressed, every press of it.
+        std::sort(ordered.data(),
+                  ordered.data() + workingSetSize,
+                  [](const HeldEntry& a, const HeldEntry& b) noexcept
+                  {
+                      return a.order < b.order;
+                  });
+
+        if (! usesPlayOrder(currentParameters.pattern))
         {
-            std::sort(ordered.data(),
-                      ordered.data() + workingSetSize,
-                      [](const HeldEntry& a, const HeldEntry& b) noexcept
-                      {
-                          return a.order < b.order;
-                      });
-        }
-        else
-        {
+            // The other patterns play each note once, with its last press's velocity: of a long latched line the 16
+            // pressed last, which is what the step arrays and a chord hold.
+            std::array<HeldEntry, maxArpHeldNotes> once {};
+            int count = 0;
+            for (int i = workingSetSize - 1; i >= 0 && count < maxArpHeldNotes; --i)
+            {
+                const auto& entry = ordered[static_cast<size_t>(i)];
+                bool seen = false;
+                for (int k = 0; k < count && ! seen; ++k)
+                    seen = once[static_cast<size_t>(k)].noteNumber == entry.noteNumber;
+                if (! seen)
+                    once[static_cast<size_t>(count++)] = entry;
+            }
+            for (int k = 0; k < count; ++k)
+                ordered[static_cast<size_t>(k)] = once[static_cast<size_t>(k)];
+            workingSetSize = count;
+
             std::sort(ordered.data(),
                       ordered.data() + workingSetSize,
                       [](const HeldEntry& a, const HeldEntry& b) noexcept
@@ -822,7 +838,7 @@ namespace coolsynth::synth
 
     int Arpeggiator::pickNextPatternNote(float& outVelocity) noexcept
     {
-        std::array<HeldEntry, maxArpHeldNotes> ordered {};
+        std::array<HeldEntry, maxArpLatchedNotes> ordered {};
         const int workingSetSize = buildOrderedWorkingSet(ordered);
         if (workingSetSize <= 0)
             return -1;
