@@ -321,6 +321,9 @@ public:
             expect(net->runUntilTrue(2 * second, [&] { return net->core(b).sessionId() == aSession; }));
             expect(net->core(b).playState() == net->core(a).playState() && net->core(b).playState().playing,
                    "the session's play state taken over");
+            // The run above stops at the step b joins, and its announce may wait out the announce gap: on Windows'
+            // random delays it was sent at that step, on the Mac's it was still to come and the test failed there.
+            net->runFor(SyncCore::kAnnounceGap);
             expectEquals(net->core(b).playChangeCount(), (std::int64_t) 0, "but not applied to the app");
             const auto& reports = net->core(b).measurementReports();
             if (expect(! reports.empty(), "measured"), ! reports.empty())
