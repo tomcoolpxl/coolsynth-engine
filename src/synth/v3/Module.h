@@ -46,6 +46,9 @@ namespace coolsynth::synth::v3
         Unit unit = Unit::generic;
         bool modulatable = true;
         const char* options = nullptr; // '|'-separated names of the integer positions, or null
+        // What the value means in seconds, where a player reads it as a time: a reverb's Size as the length of
+        // its tail (CoolSynth's D373). Rising with the value. Null: shown by its unit.
+        double (*seconds)(float units) = nullptr;
     };
 
     struct ModuleDescriptor

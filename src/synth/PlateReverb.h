@@ -119,7 +119,18 @@ namespace coolsynth::synth
         /** 0..1: short room to long plate. Decay is applied once per tank half, as in the paper. A change glides. */
         void setSize(float size) noexcept
         {
-            decayTarget = 0.25f + 0.70f * std::clamp(size, 0.0f, 1.0f);
+            decayTarget = decayOf(size);
+        }
+
+        /** The tail's length a Size gives: the time its level takes to fall 60 dB, in seconds (CoolSynth's D373).
+            Once round the tank is both halves' delays, kTankSamples at the reference rate, and costs the decay
+            twice: that is the time of its lowest notes. The whole tail, measured on the impulse response with
+            Damping at its middle, lasts 0.86 to 0.88 of it at every Size (tests/ReverbTimeTests.cpp), which is the
+            time given here; with Damping at 0 it is up to a tenth longer. Shimmer feeds the tail and makes it longer. */
+        [[nodiscard]] static double decaySeconds(float size) noexcept
+        {
+            const double roundTrip = static_cast<double>(kTankSamples) / kReferenceSampleRate;
+            return kMeasuredShare * -1.5 * roundTrip / std::log10(static_cast<double>(decayOf(size)));
         }
 
         /** 0..1: bright to dark high-frequency decay. A change glides. */
@@ -282,6 +293,10 @@ namespace coolsynth::synth
         static constexpr double kShimmerHighPassHz = 180.0;
         static constexpr float kShimmerGain = 0.7f;
         static constexpr double kReferenceSampleRate = 29761.0;
+        // Both halves' delays and all-passes, as prepare() sizes them: 672 + 4453 + 1800 + 3720 and 908 + 4217 + 2656 + 3163.
+        static constexpr int kTankSamples = 21589;
+        static constexpr double kMeasuredShare = 0.875;
+        [[nodiscard]] static float decayOf(float size) noexcept { return 0.25f + 0.70f * std::clamp(size, 0.0f, 1.0f); }
         static constexpr int kMaxExcursion = 16;
         static constexpr double kModulationRateHz = 0.9;
         static constexpr float kTwoPi = 6.28318530717958647692f;

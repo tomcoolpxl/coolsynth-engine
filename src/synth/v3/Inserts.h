@@ -63,6 +63,10 @@ namespace coolsynth::synth::v3
         inline constexpr int count = 15; // new types only at the end: the index is saved in patches
     }
 
+    /** The length of the tail a reverb's Size gives, for the Size knob to show (CoolSynth's D373). */
+    [[nodiscard]] inline double plateTailSeconds(float size) { return coolsynth::synth::PlateReverb::decaySeconds(size); }
+    [[nodiscard]] inline double roomTailSeconds(float size) { return RoomInsert::reverbSeconds(size); }
+
     /** Name and parameters of an insert type. The ranges are the master rack's. */
     [[nodiscard]] inline const ModuleDescriptor& insertDescriptor(int typeIndex)
     {
@@ -101,7 +105,7 @@ namespace coolsynth::synth::v3
                  { "division", "Division", 0.0f, 13.0f,   5.0f,   Skew::linear,      Unit::choice,       false, divisions },
                  { "mode",     "Mode",     0.0f, 1.0f,    0.0f,   Skew::linear,      Unit::choice,       false, "Tape|Ping-Pong" } }}, 6 },
             { "Reverb", 3,
-              {{ { "size",       "Size",       0.0f,  1.0f,    0.4f,  Skew::linear,      Unit::percent,      true },
+              {{ { "size",       "Size",       0.0f,  1.0f,    0.4f,  Skew::linear,      Unit::percent,      true, nullptr, &plateTailSeconds },
                  { "damping",    "Damping",    0.0f,  1.0f,    0.5f,  Skew::linear,      Unit::percent,      true },
                  { "mix",        "Mix",        0.0f,  1.0f,    0.3f,  Skew::linear,      Unit::percent,      true },
                  { "predelay",   "Pre-Delay",  0.0f,  250.0f,  0.0f,  Skew::linear,      Unit::milliseconds, true },
@@ -129,7 +133,7 @@ namespace coolsynth::synth::v3
                  { "freeze",   "Freeze",   0.0f,   1.0f,    0.0f,   Skew::linear,      Unit::choice,       false, "Off|On" },
                  { "mix",      "Mix",      0.0f,   1.0f,    0.5f,   Skew::linear,      Unit::percent,      true } }}, 8 },
             { "Room", 2,
-              {{ { "size",    "Size",    0.0f, 1.0f, 0.4f, Skew::linear, Unit::percent, true },
+              {{ { "size",    "Size",    0.0f, 1.0f, 0.4f, Skew::linear, Unit::percent, true, nullptr, &roomTailSeconds },
                  { "damping", "Damping", 0.0f, 1.0f, 0.5f, Skew::linear, Unit::percent, true },
                  { "width",   "Width",   0.0f, 1.0f, 1.0f, Skew::linear, Unit::percent, true },
                  { "mix",     "Mix",     0.0f, 1.0f, 0.3f, Skew::linear, Unit::percent, true } }}, 4 },

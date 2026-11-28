@@ -122,6 +122,7 @@ if(BUILD_TESTING AND COOLSYNTH_ENGINE_TESTS)
             "${COOLSYNTH_ENGINE_ROOT}/tests/V3VoiceTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/StepSequencerTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/ArpeggiatorTests.cpp"
+            "${COOLSYNTH_ENGINE_ROOT}/tests/ReverbTimeTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/SyncMathWireTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/SyncCoreTests.cpp"
             "${COOLSYNTH_ENGINE_ROOT}/tests/SyncAudioTests.cpp"
